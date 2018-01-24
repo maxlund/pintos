@@ -22,6 +22,7 @@ static void syscall_handler (struct intr_frame *f UNUSED)
     const char *name;
     int fd;
     int exit_code;
+
     void *stack_ptr = f->esp; // stack pointer
     int *call_code = (int*)stack_ptr; // the call code
     stack_ptr += sizeof(int); // increment beyond syscall code
@@ -71,7 +72,8 @@ static void syscall_handler (struct intr_frame *f UNUSED)
                 stack_ptr += sizeof(int); // Increment stack ptr beyond the fd - 4bytes
                 // At this point, stack_ptr points to the passed void * buffer from userspace
                 void * buf = stack_ptr;
-                off_t size = *(int *)(++stack_ptr); // Next byte points to an integer with the desired size
+                stack_ptr += 4;
+                off_t size = *(int *)(stack_ptr); // Next byte points to an integer with the desired size
                 struct thread *ct = thread_current();
                 struct file *file = ct->file_arr[fd];
                 // The return value (nr bytes read) is to be returned to userspace via eax register
@@ -87,24 +89,29 @@ static void syscall_handler (struct intr_frame *f UNUSED)
             if ((fd > 2 && fd < 128) || fd == 1)
             {
                 stack_ptr += sizeof(int); // Increment stack ptr beyond the fd - 4bytes
+                printf("String is:\t%s\n",  (char*) stack_ptr);
                 const void *buf = stack_ptr; // Ptr to the buffer to write
-                off_t size = *(int *)(++stack_ptr); // Bytes to write
-                struct thread *ct = thread_current();
-                struct file *file = ct->file_arr[fd];
+                stack_ptr += 4;
+                off_t size = *(int *)(stack_ptr); // Bytes to write
+                printf("Size:\t%d\n", size);
                 // Check if fd corresponds to stdout, in that case use putbuf() function
                 if (fd == 1)
                 {
-                    // We have hour buffer to write (buf) and the nr of bytes (size)
+                    // We have our buffer to write (buf) and the nr of bytes (size)
                     putbuf((char *) buf, size);
                     // And we don't need to return anything since we most probably use this via printf()
                     // , fprintf(stdout, "..."), ... function family - or not? :-)
                 }
                 else
                 {
+/*
+                    struct thread *ct = thread_current();
+                    struct file *file = ct->file_arr[fd];
                     // The return value (nr bytes read) is to be returned to userspace via eax register
                     off_t bytes_written = file_write(file, buf, size);
                     // Write either the actual bytes written or -1 if no bytes were written
                     f->eax = (bytes_written > 0 ? bytes_written : -1);
+*/
                 }
             }
             break;

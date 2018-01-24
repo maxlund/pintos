@@ -6,7 +6,9 @@
 
 int main(void)
 {  
-  char *descr = "This is test program v0.1 that tests your implementation basic system calls\n";
+//   printf("Init of lab 1 test\n");
+//   char *descr = "This is test program v0.1 that tests your implementation basic system calls\n";
+  char *descr = "Hello world!\n";
   char *test1 = "The first test is to create three files.\n";
   char *test2 = "Now lets write some data to the files. Write some binary data to some files.\n";
   char *test3 = "Test string that is written to a file.\n";
