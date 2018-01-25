@@ -6,6 +6,7 @@ make clean
 make -j8
 # Cd into build
 cd build
+make -C ../../examples
 # Create disk
 pintos-mkdisk fs.dsk 2
 # Format it
