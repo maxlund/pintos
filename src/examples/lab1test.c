@@ -15,6 +15,7 @@ int main(void)
   char *test5 = "Test to read from and write to bad file handles.\n";
   char *test6 = "Get data from console. Please, write something (10 characters).\n";
   char *test7 = "Test to open a file that does not exist.\n";
+  char *test8 = "Try to create an invalid file\n";
   char binarydata[10];
   char sbuf[50];
   int file[3];
@@ -103,6 +104,15 @@ int main(void)
     halt();
   }
 
+  write(STDOUT_FILENO, test8, strlen(test8));
+  if (!create(NULL, 100))  // test create a null file
+  {
+     printf("Tried to create a file with invalid name, didn't work\n");
+  }
+  if (!create("test10", -1))  // test create a -1 size file
+  {
+     printf("Tried to create a file with invalid size, didn't work\n");
+  }
   printf("Test passed\n");
   halt();
 }
