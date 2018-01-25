@@ -32,8 +32,8 @@ static void syscall_handler (struct intr_frame *f UNUSED)
             power_off();
             break;
         case SYS_CREATE:
-            name = stack_ptr; // char* points to start of filename
-            stack_ptr++; // increment beyond the filename
+            name = (char *)*(int *)stack_ptr; // char* points to start of filename
+            stack_ptr += sizeof(int); // increment beyond the filename
             off_t initial_size = *(off_t*)stack_ptr; // get the size
             f->eax = filesys_create(name, initial_size); // call the system call 'create' and push return val to eax
             break;
@@ -49,12 +49,10 @@ static void syscall_handler (struct intr_frame *f UNUSED)
             {
                 ct->file_arr[fd] = fp; // file_arr at file descriptor set
                 f->eax = fd; // file descriptor pushed to eax (returned to user)
-                printf("fd=%d\n", fd);
             }
             break;
         case SYS_CLOSE:
             fd = *(int *) stack_ptr;
-            printf("fd=%d\n", fd);
             if (fd > 2 && fd < 128)
             {
                 struct thread *ct = thread_current();
@@ -66,52 +64,63 @@ static void syscall_handler (struct intr_frame *f UNUSED)
         case SYS_READ:
             // Parse fd
             fd = *(int *) stack_ptr;
-            printf("fd=%d\n", fd);
-            if (fd > 2 && fd < 128)
+            if ((fd > 2 && fd < 128) || fd == 0)
             {
                 stack_ptr += sizeof(int); // Increment stack ptr beyond the fd - 4bytes
                 // At this point, stack_ptr points to the passed void * buffer from userspace
-                void * buf = stack_ptr;
+                char * buf = (char *) * (int *)stack_ptr;
+                // Make a copy of this pointer
+                char * tmpbuf = buf;
                 stack_ptr += 4;
                 off_t size = *(int *)(stack_ptr); // Next byte points to an integer with the desired size
-                struct thread *ct = thread_current();
-                struct file *file = ct->file_arr[fd];
-                // The return value (nr bytes read) is to be returned to userspace via eax register
-                off_t bytes_read = file_read(file, buf, size);
-                // Write either the read bytes or -1 if somewhing went wrong
-                f->eax = (bytes_read > 0 ? bytes_read : -1);
+                off_t bytes_read = 0;
+                if (fd == 0)
+                {
+                    int i;
+                    for (i=0; i<size; ++i)
+                    {
+                        *tmpbuf++ = input_getc();
+                    }
+                    f->eax = i;
+                }
+                else
+                {
+                    struct thread *ct = thread_current();
+                    struct file *file = ct->file_arr[fd];
+                    // The return value (nr bytes read) is to be returned to userspace via eax register
+                    bytes_read = file_read(file, buf, size);
+                    // Write either the read bytes or -1 if somewhing went wrong
+                    f->eax = (bytes_read > 0 ? bytes_read : -1);
+                }
             }
             break;
         case SYS_WRITE:
             // Parse fd
             fd = *(int *) stack_ptr;
-            printf("fd=%d\n", fd);
             if ((fd > 2 && fd < 128) || fd == 1)
             {
                 stack_ptr += sizeof(int); // Increment stack ptr beyond the fd - 4bytes
-                printf("String is:\t%s\n",  (char*) stack_ptr);
-                const void *buf = stack_ptr; // Ptr to the buffer to write
-                stack_ptr += 4;
+                const int *tmp = (int *)stack_ptr; // Ptr to the pointer to the buffer to write
+                const char *buf = (char *) * tmp; // Char* cast to the dereferenced pointer of the stack
+                stack_ptr += sizeof(int); // Increment stack ptr beyond the fd - 4bytes
+
                 off_t size = *(int *)(stack_ptr); // Bytes to write
-                printf("Size:\t%d\n", size);
                 // Check if fd corresponds to stdout, in that case use putbuf() function
                 if (fd == 1)
                 {
                     // We have our buffer to write (buf) and the nr of bytes (size)
-                    putbuf((char *) buf, size);
+                    putbuf(buf, size);
                     // And we don't need to return anything since we most probably use this via printf()
                     // , fprintf(stdout, "..."), ... function family - or not? :-)
                 }
                 else
                 {
-/*
                     struct thread *ct = thread_current();
                     struct file *file = ct->file_arr[fd];
                     // The return value (nr bytes read) is to be returned to userspace via eax register
                     off_t bytes_written = file_write(file, buf, size);
                     // Write either the actual bytes written or -1 if no bytes were written
                     f->eax = (bytes_written > 0 ? bytes_written : -1);
-*/
                 }
             }
             break;
@@ -122,8 +131,7 @@ static void syscall_handler (struct intr_frame *f UNUSED)
             process_exit();
             break;
     }
-    printf ("system call!\n");
-    thread_exit ();
+//     thread_exit ();
 }
 
 
