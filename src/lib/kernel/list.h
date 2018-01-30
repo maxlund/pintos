@@ -165,4 +165,7 @@ void list_unique (struct list *, struct list *duplicates,
 struct list_elem *list_max (struct list *, list_less_func *, void *aux);
 struct list_elem *list_min (struct list *, list_less_func *, void *aux);
 
+// custom greater than function
+bool thread_less_than(const struct list_elem *first, const struct list_elem *second, void *aux);
+
 #endif /* lib/kernel/list.h */

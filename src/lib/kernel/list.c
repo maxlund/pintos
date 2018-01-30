@@ -1,3 +1,4 @@
+#include "threads/thread.h"
 #include "list.h"
 #include "../debug.h"
 
@@ -529,4 +530,10 @@ list_min (struct list *list, list_less_func *less, void *aux)
           min = e; 
     }
   return min;
+}
+
+bool thread_less_than(const struct list_elem *first, const struct list_elem *second, void *aux)
+{
+   return (list_entry(first, struct thread, elem)->wait_time <
+           list_entry(second, struct thread, elem)->wait_time);
 }

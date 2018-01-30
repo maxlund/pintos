@@ -7,6 +7,8 @@
 #include "threads/io.h"
 #include "threads/synch.h"
 #include "threads/thread.h"
+#include "list.h"
+
   
 /* See [8254] for hardware details of the 8254 timer chip. */
 
@@ -16,6 +18,8 @@
 #if TIMER_FREQ > 1000
 #error TIMER_FREQ <= 1000 recommended
 #endif
+
+#define SEMAPHORE_VALUE 1
 
 /* Number of timer ticks since OS booted. */
 static int64_t ticks;
@@ -28,6 +32,11 @@ static intr_handler_func timer_interrupt;
 static bool too_many_loops (unsigned loops);
 static void busy_wait (int64_t loops);
 static void real_time_sleep (int64_t num, int32_t denom);
+
+struct list wait_list; // wait list for our threads
+
+extern bool thread_less_than(const struct list_elem *first,
+                             const struct list_elem *second, void *aux);
 
 /* Sets up the 8254 Programmable Interval Timer (PIT) to
    interrupt PIT_FREQ times per second, and registers the
@@ -44,6 +53,9 @@ timer_init (void)
   outb (0x40, count >> 8);
 
   intr_register_ext (0x20, timer_interrupt, "8254 Timer");
+
+  // Init our wait list
+  list_init(&wait_list);
 }
 
 /* Calibrates loops_per_tick, used to implement brief delays. */
@@ -97,10 +109,18 @@ void
 timer_sleep (int64_t ticks) 
 {
   int64_t start = timer_ticks ();
-
+  int64_t wt = start + ticks;
+  struct thread * ct = thread_current();
+  
   ASSERT (intr_get_level () == INTR_ON);
-  while (timer_elapsed (start) < ticks) 
-    thread_yield ();
+
+  enum intr_level old_level = intr_disable();
+  ct->status = THREAD_BLOCKED;
+  ct->wait_time = wt;
+  list_insert_ordered(&wait_list, &ct->elem, &thread_less_than, NULL);
+  thread_block();
+  /* TODO : ask how we run this code to enable interrupts when thread is blocked */
+  intr_set_level(old_level);
 }
 
 /* Suspends execution for approximately MS milliseconds. */
@@ -136,6 +156,19 @@ static void
 timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
+  if (!list_empty(&wait_list))
+  {
+     struct list_elem *front_elem = list_front(&wait_list); // get first elem of list
+     struct thread * front_thread = list_entry(front_elem, struct thread, elem);
+     while (ticks >= front_thread->wait_time)
+     {
+        thread_unblock(front_thread); // thread_unblock sets status from THREAD_BLOCKED to THREAD_READY
+        list_remove(front_elem);
+        if (list_empty(&wait_list)) break;
+        front_elem = list_next(front_elem);
+        front_thread = list_entry(front_elem, struct thread, elem);
+     }
+  }
   thread_tick ();
 }
 
