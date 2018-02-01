@@ -115,7 +115,13 @@ timer_sleep (int64_t ticks)
   ASSERT (intr_get_level () == INTR_ON);
 
   enum intr_level old_level = intr_disable();
-  ct->status = THREAD_BLOCKED;
+  /*
+   * If we look inside of the thread_block() function (thread.c:213),
+   * the thread's status is actually set to THREAD_BLOCKED,
+   * so we don't need to set it here as well. But I don't believe
+   * this is the reason of the failure
+   * */
+//   ct->status = THREAD_BLOCKED;
   ct->wait_time = wt;
   list_insert_ordered(&wait_list, &ct->elem, &thread_less_than, NULL);
   thread_block();
@@ -163,6 +169,8 @@ timer_interrupt (struct intr_frame *args UNUSED)
      while (ticks >= front_thread->wait_time)
      {
         thread_unblock(front_thread); // thread_unblock sets status from THREAD_BLOCKED to THREAD_READY
+        // Schedule it back
+        schedule();
         list_remove(front_elem);
         if (list_empty(&wait_list)) break;
         front_elem = list_next(front_elem);
