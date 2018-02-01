@@ -8,7 +8,6 @@
 #include "threads/synch.h"
 #include "threads/thread.h"
 #include "list.h"
-
   
 /* See [8254] for hardware details of the 8254 timer chip. */
 
@@ -18,8 +17,6 @@
 #if TIMER_FREQ > 1000
 #error TIMER_FREQ <= 1000 recommended
 #endif
-
-#define SEMAPHORE_VALUE 1
 
 /* Number of timer ticks since OS booted. */
 static int64_t ticks;
@@ -34,9 +31,6 @@ static void busy_wait (int64_t loops);
 static void real_time_sleep (int64_t num, int32_t denom);
 
 struct list wait_list; // wait list for our threads
-
-extern bool thread_less_than(const struct list_elem *first,
-                             const struct list_elem *second, void *aux);
 
 /* Sets up the 8254 Programmable Interval Timer (PIT) to
    interrupt PIT_FREQ times per second, and registers the
@@ -95,7 +89,6 @@ timer_ticks (void)
   barrier ();
   return t;
 }
-
 /* Returns the number of timer ticks elapsed since THEN, which
    should be a value once returned by timer_ticks(). */
 int64_t
@@ -115,17 +108,12 @@ timer_sleep (int64_t ticks)
   ASSERT (intr_get_level () == INTR_ON);
 
   enum intr_level old_level = intr_disable();
-  /*
-   * If we look inside of the thread_block() function (thread.c:213),
-   * the thread's status is actually set to THREAD_BLOCKED,
-   * so we don't need to set it here as well. But I don't believe
-   * this is the reason of the failure
-   * */
-//   ct->status = THREAD_BLOCKED;
+
   ct->wait_time = wt;
-  list_insert_ordered(&wait_list, &ct->elem, &thread_less_than, NULL);
-  thread_block();
-  /* TODO : ask how we run this code to enable interrupts when thread is blocked */
+  list_push_back(&wait_list, &ct->wait_elem);
+
+  thread_block(); // thread_block() sets thread statsu to THREAD_BLOCKED
+
   intr_set_level(old_level);
 }
 
@@ -162,41 +150,47 @@ static void
 timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
+  // Check if there is something in the list
   if (!list_empty(&wait_list))
   {
-     struct list_elem *front_elem = list_front(&wait_list); // get first elem of list
-     struct thread * front_thread = list_entry(front_elem, struct thread, elem);
-     while (ticks >= front_thread->wait_time)
-     {
-        thread_unblock(front_thread); // thread_unblock sets status from THREAD_BLOCKED to THREAD_READY
-        // Schedule it back
-        schedule();
-        list_remove(front_elem);
-        if (list_empty(&wait_list)) break;
-        front_elem = list_next(front_elem);
-        front_thread = list_entry(front_elem, struct thread, elem);
-     }
+      struct list_elem * e = list_begin(&wait_list);
+      while (e != list_end(&wait_list))
+      {
+          struct thread * ts = list_entry(e, struct thread, wait_elem);
+          // check status and elapsed time
+          if (ts->status == THREAD_BLOCKED && ticks >= ts->wait_time)
+          {
+              // Only now (i.e, if the thread is blocked AND if the ticks have
+              // exceeded the waiting time) we want to unblock
+              thread_unblock(ts);
+              e = list_remove(e);
+          }
+          else
+          {
+              e = list_next(e);
+          }
+      }
   }
   thread_tick ();
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer
    tick, otherwise false. */
-static bool
+    static bool
 too_many_loops (unsigned loops) 
 {
-  /* Wait for a timer tick. */
-  int64_t start = ticks;
-  while (ticks == start)
+    /* Wait for a timer tick. */
+    int64_t start = ticks;
+    while (ticks == start)
+        barrier ();
+
+    /* Run LOOPS loops. */
+    start = ticks;
+    busy_wait (loops);
+
+    /* If the tick count changed, we iterated too long. */
     barrier ();
-
-  /* Run LOOPS loops. */
-  start = ticks;
-  busy_wait (loops);
-
-  /* If the tick count changed, we iterated too long. */
-  barrier ();
-  return start != ticks;
+    return start != ticks;
 }
 
 /* Iterates through a simple loop LOOPS times, for implementing
@@ -206,40 +200,40 @@ too_many_loops (unsigned loops)
    affect timings, so that if this function was inlined
    differently in different places the results would be difficult
    to predict. */
-static void NO_INLINE
+    static void NO_INLINE
 busy_wait (int64_t loops) 
 {
-  while (loops-- > 0)
-    barrier ();
+    while (loops-- > 0)
+        barrier ();
 }
 
 /* Sleep for approximately NUM/DENOM seconds. */
-static void
+    static void
 real_time_sleep (int64_t num, int32_t denom) 
 {
-  /* Convert NUM/DENOM seconds into timer ticks, rounding down.
-          
-        (NUM / DENOM) s          
-     ---------------------- = NUM * TIMER_FREQ / DENOM ticks. 
-     1 s / TIMER_FREQ ticks
-  */
-  int64_t ticks = num * TIMER_FREQ / denom;
+    /* Convert NUM/DENOM seconds into timer ticks, rounding down.
 
-  ASSERT (intr_get_level () == INTR_ON);
-  if (ticks > 0)
+       (NUM / DENOM) s          
+       ---------------------- = NUM * TIMER_FREQ / DENOM ticks. 
+       1 s / TIMER_FREQ ticks
+       */
+    int64_t ticks = num * TIMER_FREQ / denom;
+
+    ASSERT (intr_get_level () == INTR_ON);
+    if (ticks > 0)
     {
-      /* We're waiting for at least one full timer tick.  Use
-         timer_sleep() because it will yield the CPU to other
-         processes. */                
-      timer_sleep (ticks); 
+        /* We're waiting for at least one full timer tick.  Use
+           timer_sleep() because it will yield the CPU to other
+           processes. */                
+        timer_sleep (ticks); 
     }
-  else 
+    else 
     {
-      /* Otherwise, use a busy-wait loop for more accurate
-         sub-tick timing.  We scale the numerator and denominator
-         down by 1000 to avoid the possibility of overflow. */
-      ASSERT (denom % 1000 == 0);
-      busy_wait (loops_per_tick * num / 1000 * TIMER_FREQ / (denom / 1000)); 
+        /* Otherwise, use a busy-wait loop for more accurate
+           sub-tick timing.  We scale the numerator and denominator
+           down by 1000 to avoid the possibility of overflow. */
+        ASSERT (denom % 1000 == 0);
+        busy_wait (loops_per_tick * num / 1000 * TIMER_FREQ / (denom / 1000)); 
     }
 }
 

@@ -534,6 +534,12 @@ list_min (struct list *list, list_less_func *less, void *aux)
 
 bool thread_less_than(const struct list_elem *first, const struct list_elem *second, void *aux)
 {
-   return (list_entry(first, struct thread, elem)->wait_time <
-           list_entry(second, struct thread, elem)->wait_time);
+    struct thread *t1 = list_entry(first, struct thread, wait_elem);
+    struct thread *t2 = list_entry(second, struct thread, wait_elem);
+   
+   if (t1->wait_time == t2->wait_time) // sort by priority if threads wake_time is the same
+      return t1->priority < t2->priority;
+
+   return t1->wait_time < t2->wait_time; // otherwise sort by wait_time
 }
+
