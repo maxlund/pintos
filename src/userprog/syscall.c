@@ -4,7 +4,9 @@
 #include <syscall-nr.h>
 #include "threads/interrupt.h"
 #include "threads/thread.h"
+#include "threads/malloc.h"
 #include "threads/init.h"
+#include "threads/vaddr.h"
 #include "lib/syscall-nr.h"
 #include "lib/kernel/stdio.h"
 #include "devices/input.h"
@@ -20,9 +22,13 @@ void syscall_init (void)
 
 static void syscall_handler (struct intr_frame *f UNUSED)
 {
+   const char *process;
    const char *name;
+   struct thread * parent;
+   int * ptr;
    int fd; // file descriptor
    int exit_code;
+   tid_t thread_id;
 
    void *stack_ptr = f->esp; // stack pointer
    int *call_code = (int*)stack_ptr; // the call code
@@ -161,15 +167,44 @@ static void syscall_handler (struct intr_frame *f UNUSED)
             f->eax = -1;
          }
          break;
-      case SYS_EXIT:
-         // Parse code, 4-byte integer
+      case SYS_EXIT:         // Parse code, 4-byte integer
          exit_code = *(int *) stack_ptr;
-         // Let's use process_exit() routine --- but error code ?
-         process_exit();
+         parent = thread_current()->parent;
+         parent->child_exit_code = exit_code;
+         thread_unblock(parent);
+         thread_exit();
          break;
+      case SYS_EXEC:
+         ptr = (int *) stack_ptr;
+         if (!ptr || (void *) ptr > PHYS_BASE)
+         {
+            f->eax = -1;
+         }
+         else
+         {
+            tid_t child_id = process_execute((char *)ptr);
+            struct thread * ct = thread_current();
+
+            // if we have filled 10 children, reallocate space for 10 more
+            if (ct->nr_children > 0 && ct->nr_children % 10 == 0)
+            {
+               ct->children = (tid_t *) realloc(ct->children, sizeof *ct->children * (10 +  ct->nr_children));
+            }
+
+            ct->children[ct->nr_children++] = child_id;
+            f->eax = child_id;
+         }
+         break;
+      case SYS_WAIT:
+         thread_id = *(int *)stack_ptr;
+         if (thread_id == TID_ERROR)
+         {
+            f->eax = -1;
+         }
+         else
+         {
+            f->eax = process_wait(thread_id);
+         }
    }
-//     thread_exit ();
 }
-
-
 

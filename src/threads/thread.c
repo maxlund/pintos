@@ -8,6 +8,7 @@
 #include "threads/interrupt.h"
 #include "threads/intr-stubs.h"
 #include "threads/palloc.h"
+#include "threads/malloc.h"
 #include "threads/switch.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
@@ -165,9 +166,13 @@ thread_create (const char *name, int priority,
   struct kernel_thread_frame *kf;
   struct switch_entry_frame *ef;
   struct switch_threads_frame *sf;
+  struct thread_param * p;
   tid_t tid;
 
   ASSERT (function != NULL);
+
+  // Cast back the thread_param struct
+  p = (struct thread_param *) aux;
 
   /* Allocate thread. */
   t = palloc_get_page (PAL_ZERO);
@@ -177,12 +182,17 @@ thread_create (const char *name, int priority,
   /* Initialize thread. */
   init_thread (t, name, priority);
   tid = t->tid = allocate_tid ();
-
-  /* Stack frame for kernel_thread(). */
+#ifdef USERPROG
+  // Allocate memory for the children array (10 to start with)
+  t->children = (tid_t *) malloc (sizeof *t->children * 10);
+  t->parent = p->parent;
+#endif
+  
+   /* Stack frame for kernel_thread(). */
   kf = alloc_frame (t, sizeof *kf);
   kf->eip = NULL;
   kf->function = function;
-  kf->aux = aux;
+  kf->aux = p->fn_copy;
 
   /* Stack frame for switch_entry(). */
   ef = alloc_frame (t, sizeof *ef);
@@ -284,6 +294,8 @@ thread_exit (void)
      We will be destroyed during the call to schedule_tail(). */
   intr_disable ();
   thread_current ()->status = THREAD_DYING;
+  // Free up the children array
+  free(thread_current()->children);
   schedule ();
   NOT_REACHED ();
 }
