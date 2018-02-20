@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <lib/string.h>
 #include "userprog/gdt.h"
 #include "userprog/pagedir.h"
 #include "userprog/tss.h"
@@ -19,8 +20,13 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 
+#define WORD_SIZE   4 /* Bytes in every stack word */
+
+static size_t g_offset = 0;
+
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
+
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -56,14 +62,31 @@ process_execute (const char *file_name)
     return tid;
 }
 
+static void
+push_to_stack(void * init_address, uint32_t * data, size_t nr_bytes)
+{
+    // Push down the current data by 'g_offset' bytes
+    for (int32_t i = (g_offset -1 ) * WORD_SIZE; i >= 0; i-=WORD_SIZE)
+    {
+        *(uint32_t *)(init_address + i + WORD_SIZE) = *(uint32_t * ) (init_address + i);
+    }
+    // Prepend the new data
+    *(uint32_t * ) init_address = data;
+    // Update the g_offset
+    g_offset += nr_bytes;
+}
+
 /* A thread function that loads a user process and starts it
    running. */
 static void
 start_process (void * data)
 {
     struct thread_param * p = (struct thread_param *) data;
-    char *file_name = p->fn_copy;
     struct thread * parent = p->parent;
+    char *file_name = p->fn_copy;
+
+    char file_name_cpy [200];
+    strlcpy(file_name_cpy, file_name, strlen(file_name));
 
     struct intr_frame if_;
     bool success;
@@ -77,14 +100,47 @@ start_process (void * data)
 
     // Set up the stack
     void * stack_ptr = &if_.esp;
-    // 'file_name' is a pointer containing all the args to the program,
-    // + the program itself
-    char * token = strchr(file_name, ' ');
-    if (!token)
+    char *token, *save_ptr;
+    // init the arg count
+    int argc = 0;
+
+    // The very first thing to be pushed to the stack is the return address of the
+    // process to execute. Since this is unused, we push a NULL ptr.
+    push_to_stack(stack_ptr, NULL, WORD_SIZE);
+
+    for (token = strtok_r (file_name, " ", &save_ptr); token != NULL;
+            token = strtok_r (NULL, " ", &save_ptr))
     {
-        // Program did not have arguments
+        // Add up the arg count
+        ++argc;
     }
-    // TODO: TOkenize and push argc, argv, argv[0] and return address to the stack!!
+    // Next, we need to push the arg. count
+    push_to_stack(stack_ptr, argc, WORD_SIZE);
+    /* At this point, 'token' holds a pointer to the first arg, i.e., argv[0]
+
+       This means the following:
+
+       token ----> ptr to the first argument (argv[0])
+       &token ---> memory address of the ptr to argv[0] = argv**
+       */
+    push_to_stack(stack_ptr, (uint32_t) &token, WORD_SIZE);
+
+    for(uint32_t address = &token; address <= token; address+=WORD_SIZE) 
+    {
+        push_to_stack(stack_ptr, NULL, WORD_SIZE);
+    }
+    // Push every individual argument 
+    for (token = strtok_r (file_name_cpy, " ", &save_ptr); token != NULL;
+            token = strtok_r (NULL, " ", &save_ptr))
+    {
+        push_to_stack(stack_ptr, (uint32_t) token, WORD_SIZE);
+    }
+    // Push last argv which is NULL
+    push_to_stack(stack_ptr, NULL, WORD_SIZE);
+
+
+    //TODO: fix this mess!
+
     /* If load failed, quit. */
     palloc_free_page (file_name);
     if (!success) 
