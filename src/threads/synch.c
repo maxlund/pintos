@@ -29,6 +29,7 @@
 #include "threads/synch.h"
 #include <stdio.h>
 #include <string.h>
+#include <debug.h>
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 
@@ -109,6 +110,8 @@ void
 sema_up (struct semaphore *sema) 
 {
   enum intr_level old_level;
+
+  debug_backtrace();
 
   ASSERT (sema != NULL);
 

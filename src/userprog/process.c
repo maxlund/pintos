@@ -15,6 +15,7 @@
 #include "threads/init.h"
 #include "threads/interrupt.h"
 #include "threads/palloc.h"
+#include "threads/malloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 
@@ -40,15 +41,16 @@ process_execute (const char *file_name)
     strlcpy (fn_copy, file_name, PGSIZE);
 
     // Fill the thread params struct
-    struct thread_param p;
-    p.fn_copy = fn_copy;
-    p.parent = thread_current();
+    struct thread_param  * p = (struct thread_param *) malloc (sizeof *p);
+    p->fn_copy = fn_copy;
+    p->parent = thread_current();
 
+    /* Create a new thread to execute FILE_NAME. */
+    tid = thread_create (file_name, PRI_DEFAULT, start_process, p);
     //Before creating, we should put the parent to sleep and wake him up when
     // the child has "loaded" the new program
     thread_block();
-    /* Create a new thread to execute FILE_NAME. */
-    tid = thread_create (file_name, PRI_DEFAULT, start_process, &p);
+
     if (tid == TID_ERROR)
 	palloc_free_page (fn_copy); 
     return tid;
@@ -73,6 +75,16 @@ start_process (void * data)
     if_.eflags = FLAG_IF | FLAG_MBS;
     success = load (file_name, &if_.eip, &if_.esp);
 
+    // Set up the stack
+    void * stack_ptr = &if_.esp;
+    // 'file_name' is a pointer containing all the args to the program,
+    // + the program itself
+    char * token = strchr(file_name, ' ');
+    if (!token)
+    {
+        // Program did not have arguments
+    }
+    // TODO: TOkenize and push argc, argv, argv[0] and return address to the stack!!
     /* If load failed, quit. */
     palloc_free_page (file_name);
     if (!success) 
@@ -80,6 +92,9 @@ start_process (void * data)
 
     // Wake up the parent
     thread_unblock(parent);
+
+    // Free thread_param struct
+    free(p);
 
     /* Start the user process by simulating a return from an
        interrupt, implemented by intr_exit (in
@@ -103,11 +118,20 @@ start_process (void * data)
 int
 process_wait (tid_t child_tid UNUSED) 
 {
+    // Block the current thread and wait until the child has exited / been
+    // terminated. Only then will this thread by unblocked and the child's
+    // exit code will be already set in the 'parent_child_pairs' array.
    thread_block();
    
 #if 0
    return thread_current()->child_exit_code;
 #endif
+
+   // Look for the child's structure in the array
+   int type = 0;
+   int index = get_index_of_thread (child_tid, &type);
+
+   return (index != -1 ? (parent_child_pairs + index)->child_exit_status : -1);
 }
 
 /* Free the current process's resources. */
@@ -248,7 +272,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
     /* Uncomment the following line to print some debug
        information. This will be useful when you debug the program
        stack.*/
-/*#define STACK_DEBUG*/
+#define STACK_DEBUG
 
 #ifdef STACK_DEBUG
     printf("*esp is %p\nstack contents:\n", *esp);
@@ -495,7 +519,7 @@ setup_stack (void **esp)
     {
 	success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
 	if (success)
-	    *esp = PHYS_BASE - 12;
+	    *esp = PHYS_BASE;
 	else
 	    palloc_free_page (kpage);
     }
@@ -521,3 +545,24 @@ install_page (void *upage, void *kpage, bool writable)
     return (pagedir_get_page (t->pagedir, upage) == NULL
 	    && pagedir_set_page (t->pagedir, upage, kpage, writable));
 }
+
+int get_index_of_thread(tid_t id, int * is_parent)
+{
+    for (unsigned i = 0; i < parent_child_nr; ++i)
+    {
+        pc_t * p = parent_child_pairs + i;
+        if (p->child_id == id)
+        {
+            *is_parent = THREAD_CHILD;
+            return i;
+        }
+        if (p->parent_thread->tid == id)
+        {
+            *is_parent = THREAD_PARENT;
+            return i;
+        }
+    }
+    *is_parent = THREAD_NONE;
+    return -1;
+}
+

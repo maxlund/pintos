@@ -4,6 +4,9 @@
 #include <list.h>
 #include <stdint.h>
 
+/* How many parent-child pairs */
+uint64_t parent_child_nr;
+
 /* States in a thread's life cycle. */
 enum thread_status
   {

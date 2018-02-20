@@ -14,47 +14,10 @@
 #include "filesys/filesys.h"
 #include "filesys/file.h"
 
-// initial exit status
-#define CHILD_INIT_EXIT_STATUS 0xfa
-
-// Keys to identify wether a thread is parent or child
-#define THREAD_PARENT   0x02
-#define THREAD_CHILD    0x01
-#define THREAD_NONE     -1
-
 static void syscall_handler (struct intr_frame *);
-
-/*
- * Function:	    get_index_of_thread_
- * Brief:	        Given a thread id, it returns the position of the parent-child
- structure in 'parent-child-pairs' and determines if it corres-
- ponds to a child or parent id in the named array..
- * @param child_id:	The thread ID to look for
- * Returns:	        The index in the array, or -1 if it was not found. is_parent is
- *                  updated accordingly
- */
-static int get_index_of_thread(tid_t id, int * is_parent);
 
 /* Lock to use when adding up the global counter */
 static struct lock l;
-
-typedef struct parent_child
-{
-    /* Child's exit status */
-    int child_exit_status;
-    /* Who is alive */
-    int alive_count;
-    /* Child's thread ID */
-    tid_t child_id;
-    /* Parent's thread ID */
-    tid_t my_id;
-} pc_t;
-
-/* Keep track of parent-child pairs */
-static pc_t * parent_child_pairs;
-
-/* How many parent-child pairs */
-static uint64_t parent_child_nr = 0;
 
 void syscall_init (void)
 {
@@ -68,17 +31,19 @@ void syscall_init (void)
 
 static void syscall_handler (struct intr_frame *f UNUSED)
 {
-    const char *process;
     const char *name;
+#if 0
     struct thread * parent;
+#endif
     int * ptr;
     int fd; // file descriptor
     int exit_code;
-    tid_t thread_id;
+    tid_t child_id;
 
     void *stack_ptr = f->esp; // stack pointer
     int *call_code = (int*)stack_ptr; // the call code
     stack_ptr += sizeof(int); // increment beyond syscall code
+
     switch (*call_code)
     {
         case SYS_HALT:
@@ -159,9 +124,11 @@ static void syscall_handler (struct intr_frame *f UNUSED)
                     struct file *file = ct->file_arr[fd];
                     if (file)
                     {
-                        // The return value (nr bytes read) is to be returned to userspace via eax
-                        register
-                            bytes_read = file_read(file, buf, size);
+                        /*
+                         * The return value (nr bytes read) is to be returned to userspace
+                         * via eax register
+                        */ 
+                        bytes_read = file_read(file, buf, size);
                         // Write either the read bytes or -1 if we didn't read any bytes
                         f->eax = (bytes_read > 0 ? bytes_read : -1);
                     }
@@ -240,23 +207,40 @@ static void syscall_handler (struct intr_frame *f UNUSED)
                 if (type == THREAD_CHILD)
                 {
                     p->child_exit_status = exit_code;
-                    // And update the other id to -1
-                    p->my_id = -1;
+                    // check if my parent is blocked (probably waiting for me)
+                    if (p->parent_thread->status == THREAD_BLOCKED)
+                    {
+                        thread_unblock(p->parent_thread);
+                    }
                 }
                 else
                 {
-                    // And update the other id to -1
-                    p->child_id = -1;
+                    // update parent to a 'non-existent' status
+                    p->parent_thread = NULL;
                 }
 
                 // Check: if alive count is now 0, we should free memory
                 if (p->alive_count == 0)
                 {
-
+                    // Decrement the number of parent & child pairs
+                    parent_child_nr--;
                 }
 
                 lock_release(&l);
             }
+            // Check open files this process has
+            struct thread * current_thread = thread_current();
+            struct file * fl;
+            for (int fd = 2; fd < 130; ++fd)
+            {
+                fl = current_thread->file_arr[fd - 2]; // Account for offset
+                if (fl) file_close(fl);
+            }
+
+            // Important to pass the tests
+            printf("%s: exit(%d)\n", thread_name(), exit_code);
+
+            // Exit
             thread_exit();
             break;
         case SYS_EXEC:
@@ -296,7 +280,7 @@ static void syscall_handler (struct intr_frame *f UNUSED)
                     p.child_exit_status = CHILD_INIT_EXIT_STATUS;
                     p.alive_count = 0x02;
                     p.child_id = child_id;
-                    p.my_id = thread_current()->tid;
+                    p.parent_thread = thread_current();
 
                     // Add it to the array
                     *(parent_child_pairs + parent_child_nr++) = p;
@@ -310,35 +294,15 @@ static void syscall_handler (struct intr_frame *f UNUSED)
             }
             break;
         case SYS_WAIT:
-            thread_id = *(int *)stack_ptr;
-            if (thread_id == TID_ERROR)
+            child_id = *(int *)stack_ptr;
+            if (child_id == TID_ERROR)
             {
                 f->eax = -1;
             }
             else
             {
-                f->eax = process_wait(thread_id);
+                f->eax = process_wait(child_id);
             }
     }
-}
-
-static int get_index_of_thread(tid_t id, int * is_parent)
-{
-    for (unsigned i = 0; i < parent_child_nr; ++i)
-    {
-        pc_t * p = parent_child_pairs + i;
-        if (p->child_id == id)
-        {
-            *is_parent = THREAD_CHILD;
-            return i;
-        }
-        if (p->my_id == id)
-        {
-            *is_parent = THREAD_PARENT;
-            return i;
-        }
-    }
-    *is_parent = THREAD_NONE;
-    return -1;
 }
 
