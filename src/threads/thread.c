@@ -182,10 +182,12 @@ thread_create (const char *name, int priority,
   /* Initialize thread. */
   init_thread (t, name, priority);
   tid = t->tid = allocate_tid ();
+#if 0
 #ifdef USERPROG
   // Allocate memory for the children array (10 to start with)
   t->children = (tid_t *) malloc (sizeof *t->children * 10);
   t->parent = p->parent;
+#endif
 #endif
   
    /* Stack frame for kernel_thread(). */
@@ -294,8 +296,10 @@ thread_exit (void)
      We will be destroyed during the call to schedule_tail(). */
   intr_disable ();
   thread_current ()->status = THREAD_DYING;
+#if 0
   // Free up the children array
   free(thread_current()->children);
+#endif
   schedule ();
   NOT_REACHED ();
 }

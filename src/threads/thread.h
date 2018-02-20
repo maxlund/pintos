@@ -98,10 +98,13 @@ struct thread
     /* Owned by userprog/process.c. */
      uint32_t *pagedir;                  /* Page directory. */
      struct file * file_arr[128];
+#if 0
      tid_t * children;
      uint64_t nr_children;
      struct thread * parent;
      size_t child_exit_code;
+#endif
+
 #endif
 
     /* Owned by thread.c. */

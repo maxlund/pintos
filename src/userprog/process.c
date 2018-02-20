@@ -96,7 +96,9 @@ process_wait (tid_t child_tid UNUSED)
 {
    thread_block();
    
+#if 0
    return thread_current()->child_exit_code;
+#endif
 }
 
 /* Free the current process's resources. */
