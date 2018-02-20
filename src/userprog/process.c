@@ -44,6 +44,9 @@ process_execute (const char *file_name)
     p.fn_copy = fn_copy;
     p.parent = thread_current();
 
+    //Before creating, we should put the parent to sleep and wake him up when
+    // the child has "loaded" the new program
+    thread_block();
     /* Create a new thread to execute FILE_NAME. */
     tid = thread_create (file_name, PRI_DEFAULT, start_process, &p);
     if (tid == TID_ERROR)
@@ -54,9 +57,12 @@ process_execute (const char *file_name)
 /* A thread function that loads a user process and starts it
    running. */
 static void
-start_process (void *file_name_)
+start_process (void * data)
 {
-    char *file_name = file_name_;
+    struct thread_param * p = (struct thread_param *) data;
+    char *file_name = p->fn_copy;
+    struct thread * parent = p->parent;
+
     struct intr_frame if_;
     bool success;
 
@@ -71,6 +77,9 @@ start_process (void *file_name_)
     palloc_free_page (file_name);
     if (!success) 
 	thread_exit ();
+
+    // Wake up the parent
+    thread_unblock(parent);
 
     /* Start the user process by simulating a return from an
        interrupt, implemented by intr_exit (in
