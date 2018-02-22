@@ -62,18 +62,76 @@ process_execute (const char *file_name)
     return tid;
 }
 
+/* Pushes data to the stack */
 static void
-push_to_stack(void * init_address, uint32_t * data, size_t nr_bytes)
+push_to_stack(void * init_address, uint32_t data, size_t nr_bytes)
 {
     // Push down the current data by 'g_offset' bytes
     for (int32_t i = (g_offset -1 ) * WORD_SIZE; i >= 0; i-=WORD_SIZE)
     {
-        *(uint32_t *)(init_address + i + WORD_SIZE) = *(uint32_t * ) (init_address + i);
+        *(uint32_t *)(init_address - i - WORD_SIZE) = *(uint32_t * ) (init_address - i);
     }
     // Prepend the new data
     *(uint32_t * ) init_address = data;
     // Update the g_offset
     g_offset += nr_bytes;
+}
+
+/* Fills the stack */
+static void
+fill_stack(void * stack_ptr, char * cmdline)
+{
+    char *token, *save_ptr;
+    // init the arg count
+    int argc = 0;
+    size_t cmdlen = 0;
+
+    for (token = strtok_r (cmdline, " ", &save_ptr); token != NULL;
+            token = strtok_r (NULL, " ", &save_ptr))
+    {
+        argc++;
+        cmdlen += (strlen(token) + 1); // Account for the \0 byte (+1)
+    }
+
+    // Now, copy all cmdline bytes
+    memcpy(stack_ptr - cmdlen, cmdline, cmdlen);
+
+    // Check for the whole length of the cmdline, and based on that, add word alignment
+    size_t word_align = (cmdlen % 4 == 0 ? 0 : WORD_SIZE - (cmdlen % WORD_SIZE) );
+    push_to_stack(stack_ptr, 0x00, word_align);
+
+    // Next, add every argument
+    push_to_stack(stack_ptr, 0x00, WORD_SIZE);
+
+    // Get the pointers to each argv
+    size_t n = 0;
+    for (size_t i = cmdlen - 1; n < argc; --i)
+    {
+        if ( *(cmdline + i) == '\0')
+        {
+            ++n;
+            if (i < cmdlen - 1)
+            {
+                if (*(cmdline + i + 1) != '\0')
+                    // Only now we want to push this pointer to the stack
+                    push_to_stack(stack_ptr, (uint32_t) (cmdline + i + 1), WORD_SIZE);
+            }
+        }
+    }
+    // Push the first word, i.e., argv[0]
+    push_to_stack(stack_ptr, (uint32_t) cmdline, WORD_SIZE);
+
+    // Finally, push both argv and argc
+    //
+    // Note that at this point, 'cmdline' holds a pointer to the first argv[0], so
+    // &cmdline is its memory address, i.e., argv **
+    push_to_stack(stack_ptr, (uint32_t ) &cmdline, WORD_SIZE); // Memory address of argv[0] !!
+    push_to_stack(stack_ptr, argc, WORD_SIZE);
+    // Return address --> not needed ...
+    push_to_stack(stack_ptr, 0x00, WORD_SIZE);
+
+    // Update esp with the number of written bytes
+    stack_ptr -= g_offset;
 }
 
 /* A thread function that loads a user process and starts it
@@ -84,9 +142,6 @@ start_process (void * data)
     struct thread_param * p = (struct thread_param *) data;
     struct thread * parent = p->parent;
     char *file_name = p->fn_copy;
-
-    char file_name_cpy [200];
-    strlcpy(file_name_cpy, file_name, strlen(file_name));
 
     struct intr_frame if_;
     bool success;
@@ -99,47 +154,7 @@ start_process (void * data)
     success = load (file_name, &if_.eip, &if_.esp);
 
     // Set up the stack
-    void * stack_ptr = &if_.esp;
-    char *token, *save_ptr;
-    // init the arg count
-    int argc = 0;
-
-    // The very first thing to be pushed to the stack is the return address of the
-    // process to execute. Since this is unused, we push a NULL ptr.
-    push_to_stack(stack_ptr, NULL, WORD_SIZE);
-
-    for (token = strtok_r (file_name, " ", &save_ptr); token != NULL;
-            token = strtok_r (NULL, " ", &save_ptr))
-    {
-        // Add up the arg count
-        ++argc;
-    }
-    // Next, we need to push the arg. count
-    push_to_stack(stack_ptr, argc, WORD_SIZE);
-    /* At this point, 'token' holds a pointer to the first arg, i.e., argv[0]
-
-       This means the following:
-
-       token ----> ptr to the first argument (argv[0])
-       &token ---> memory address of the ptr to argv[0] = argv**
-       */
-    push_to_stack(stack_ptr, (uint32_t) &token, WORD_SIZE);
-
-    for(uint32_t address = &token; address <= token; address+=WORD_SIZE) 
-    {
-        push_to_stack(stack_ptr, NULL, WORD_SIZE);
-    }
-    // Push every individual argument 
-    for (token = strtok_r (file_name_cpy, " ", &save_ptr); token != NULL;
-            token = strtok_r (NULL, " ", &save_ptr))
-    {
-        push_to_stack(stack_ptr, (uint32_t) token, WORD_SIZE);
-    }
-    // Push last argv which is NULL
-    push_to_stack(stack_ptr, NULL, WORD_SIZE);
-
-
-    //TODO: fix this mess!
+    fill_stack(&if_.esp, file_name);
 
     /* If load failed, quit. */
     palloc_free_page (file_name);
