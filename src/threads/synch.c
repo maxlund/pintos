@@ -111,7 +111,7 @@ sema_up (struct semaphore *sema)
 {
   enum intr_level old_level;
 
-  debug_backtrace();
+//   debug_backtrace();
 
   ASSERT (sema != NULL);
 

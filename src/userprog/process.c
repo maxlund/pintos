@@ -22,8 +22,6 @@
 
 #define WORD_SIZE   4 /* Bytes in every stack word */
 
-static size_t g_offset = 0;
-
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 
@@ -39,9 +37,12 @@ process_execute (const char *file_name)
     char *fn_copy;
     tid_t tid;
 
+    debug_backtrace();
     /* Make a copy of FILE_NAME.
        Otherwise there's a race between the caller and load(). */
     fn_copy = palloc_get_page (0);
+
+    debug_backtrace();
     if (fn_copy == NULL)
 	return TID_ERROR;
     strlcpy (fn_copy, file_name, PGSIZE);
@@ -51,11 +52,14 @@ process_execute (const char *file_name)
     p->fn_copy = fn_copy;
     p->parent = thread_current();
 
+    debug_backtrace();
     /* Create a new thread to execute FILE_NAME. */
     tid = thread_create (file_name, PRI_DEFAULT, start_process, p);
     //Before creating, we should put the parent to sleep and wake him up when
     // the child has "loaded" the new program
+    debug_backtrace();
     thread_block();
+    debug_backtrace();
 
     if (tid == TID_ERROR)
 	palloc_free_page (fn_copy); 
@@ -64,17 +68,17 @@ process_execute (const char *file_name)
 
 /* Pushes data to the stack */
 static void
-push_to_stack(void * init_address, uint32_t data, size_t nr_bytes)
+push_to_stack(void * init_address, uint32_t data, size_t nr_bytes, size_t * g_offset)
 {
     // Push down the current data by 'g_offset' bytes
-    for (int32_t i = (g_offset -1 ) * WORD_SIZE; i >= 0; i-=WORD_SIZE)
+    for (int32_t i = (*g_offset -1 ) * WORD_SIZE; i >= 0; i-=WORD_SIZE)
     {
         *(uint32_t *)(init_address - i - WORD_SIZE) = *(uint32_t * ) (init_address - i);
     }
     // Prepend the new data
     *(uint32_t * ) init_address = data;
     // Update the g_offset
-    g_offset += nr_bytes;
+    *g_offset += nr_bytes;
 }
 
 /* Fills the stack */
@@ -82,6 +86,7 @@ static void
 fill_stack(void * stack_ptr, char * cmdline)
 {
     char *token, *save_ptr;
+    size_t g_offset = 0;
     // init the arg count
     int argc = 0;
     size_t cmdlen = 0;
@@ -95,13 +100,15 @@ fill_stack(void * stack_ptr, char * cmdline)
 
     // Now, copy all cmdline bytes
     memcpy(stack_ptr - cmdlen, cmdline, cmdlen);
+    // Update offset
+    g_offset += cmdlen;
 
     // Check for the whole length of the cmdline, and based on that, add word alignment
     size_t word_align = (cmdlen % 4 == 0 ? 0 : WORD_SIZE - (cmdlen % WORD_SIZE) );
-    push_to_stack(stack_ptr, 0x00, word_align);
+    push_to_stack(stack_ptr, 0x00, word_align, &g_offset);
 
     // Next, add every argument
-    push_to_stack(stack_ptr, 0x00, WORD_SIZE);
+    push_to_stack(stack_ptr, 0x00, WORD_SIZE, &g_offset);
 
     // Get the pointers to each argv
     size_t n = 0;
@@ -114,21 +121,21 @@ fill_stack(void * stack_ptr, char * cmdline)
             {
                 if (*(cmdline + i + 1) != '\0')
                     // Only now we want to push this pointer to the stack
-                    push_to_stack(stack_ptr, (uint32_t) (cmdline + i + 1), WORD_SIZE);
+                    push_to_stack(stack_ptr, (uint32_t) (cmdline + i + 1), WORD_SIZE, &g_offset);
             }
         }
     }
     // Push the first word, i.e., argv[0]
-    push_to_stack(stack_ptr, (uint32_t) cmdline, WORD_SIZE);
+    push_to_stack(stack_ptr, (uint32_t) cmdline, WORD_SIZE, &g_offset);
 
     // Finally, push both argv and argc
     //
     // Note that at this point, 'cmdline' holds a pointer to the first argv[0], so
     // &cmdline is its memory address, i.e., argv **
-    push_to_stack(stack_ptr, (uint32_t ) &cmdline, WORD_SIZE); // Memory address of argv[0] !!
-    push_to_stack(stack_ptr, argc, WORD_SIZE);
+    push_to_stack(stack_ptr, (uint32_t ) &cmdline, WORD_SIZE, &g_offset); // Memory address of argv[0] !!
+    push_to_stack(stack_ptr, argc, WORD_SIZE, &g_offset);
     // Return address --> not needed ...
-    push_to_stack(stack_ptr, 0x00, WORD_SIZE);
+    push_to_stack(stack_ptr, 0x00, WORD_SIZE, &g_offset);
 
     // Update esp with the number of written bytes
     stack_ptr -= g_offset;
