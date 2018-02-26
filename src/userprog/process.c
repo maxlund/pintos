@@ -67,29 +67,31 @@ process_execute (const char *file_name)
 }
 
 /* Pushes data to the stack */
-static void
-push_to_stack(void * init_address, uint32_t data, size_t nr_bytes, size_t * g_offset)
+static void * push_to_stack(void * init_address, uint32_t data, size_t nr_bytes)
 {
-    // Push down the current data by 'g_offset' bytes
-    for (int32_t i = (*g_offset -1 ) * WORD_SIZE; i >= 0; i-=WORD_SIZE)
+    if (nr_bytes == WORD_SIZE)
     {
-        *(uint32_t *)(init_address - i - WORD_SIZE) = *(uint32_t * ) (init_address - i);
+        uint32_t * ptr = (uint32_t * ) init_address;
+        *--ptr = data;
+        init_address -= WORD_SIZE;
     }
-    // Prepend the new data
-    *(uint32_t * ) init_address = data;
-    // Update the g_offset
-    *g_offset += nr_bytes;
+    else
+    {
+        // If single bytes are to be copied, just use memcpy
+        memcpy(init_address, &data, nr_bytes);
+    }
+    return init_address;
 }
 
 /* Fills the stack */
-static void
+static void *
 fill_stack(void * stack_ptr, char * cmdline)
 {
     char *token, *save_ptr;
-    size_t g_offset = 0;
     // init the arg count
     int argc = 0;
     size_t cmdlen = 0;
+    void * current_ptr = stack_ptr;
 
     for (token = strtok_r (cmdline, " ", &save_ptr); token != NULL;
             token = strtok_r (NULL, " ", &save_ptr))
@@ -99,16 +101,15 @@ fill_stack(void * stack_ptr, char * cmdline)
     }
 
     // Now, copy all cmdline bytes
-    memcpy(stack_ptr - cmdlen, cmdline, cmdlen);
-    // Update offset
-    g_offset += cmdlen;
+    memcpy(stack_ptr - (cmdlen - 1), cmdline, cmdlen);
+    current_ptr -= cmdlen;
 
     // Check for the whole length of the cmdline, and based on that, add word alignment
     size_t word_align = (cmdlen % 4 == 0 ? 0 : WORD_SIZE - (cmdlen % WORD_SIZE) );
-    push_to_stack(stack_ptr, 0x00, word_align, &g_offset);
+    current_ptr = push_to_stack(current_ptr, 0x00, word_align);
 
     // Next, add every argument
-    push_to_stack(stack_ptr, 0x00, WORD_SIZE, &g_offset);
+    current_ptr = push_to_stack(current_ptr, 0x00, WORD_SIZE);
 
     // Get the pointers to each argv
     size_t n = 0;
@@ -121,24 +122,23 @@ fill_stack(void * stack_ptr, char * cmdline)
             {
                 if (*(cmdline + i + 1) != '\0')
                     // Only now we want to push this pointer to the stack
-                    push_to_stack(stack_ptr, (uint32_t) (cmdline + i + 1), WORD_SIZE, &g_offset);
+                    current_ptr = push_to_stack(current_ptr, (uint32_t) (cmdline + i + 1), WORD_SIZE);
             }
         }
     }
     // Push the first word, i.e., argv[0]
-    push_to_stack(stack_ptr, (uint32_t) cmdline, WORD_SIZE, &g_offset);
+    current_ptr = push_to_stack(current_ptr, (uint32_t) cmdline, WORD_SIZE);
 
     // Finally, push both argv and argc
     //
     // Note that at this point, 'cmdline' holds a pointer to the first argv[0], so
     // &cmdline is its memory address, i.e., argv **
-    push_to_stack(stack_ptr, (uint32_t ) &cmdline, WORD_SIZE, &g_offset); // Memory address of argv[0] !!
-    push_to_stack(stack_ptr, argc, WORD_SIZE, &g_offset);
+    current_ptr = push_to_stack(current_ptr, (uint32_t ) &cmdline, WORD_SIZE); // Memory address of argv* !!
+    current_ptr = push_to_stack(current_ptr, argc, WORD_SIZE);
     // Return address --> not needed ...
-    push_to_stack(stack_ptr, 0x00, WORD_SIZE, &g_offset);
+    current_ptr = push_to_stack(current_ptr, 0x00, WORD_SIZE);
 
-    // Update esp with the number of written bytes
-    stack_ptr -= g_offset;
+    return current_ptr;
 }
 
 /* A thread function that loads a user process and starts it
