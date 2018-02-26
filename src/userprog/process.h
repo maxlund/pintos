@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include "threads/thread.h"
+#include "threads/interrupt.h"
 
 // initial exit status
 #define CHILD_INIT_EXIT_STATUS 0xfa
@@ -43,6 +44,7 @@ struct thread_param
 {
    char * fn_copy;
    struct thread * parent;
+   enum intr_level parent_intr_level;
 };
 
 tid_t process_execute (const char *file_name);

@@ -51,15 +51,15 @@ process_execute (const char *file_name)
     struct thread_param  * p = (struct thread_param *) malloc (sizeof *p);
     p->fn_copy = fn_copy;
     p->parent = thread_current();
+    p->parent_intr_level = intr_get_level();
 
     debug_backtrace();
     /* Create a new thread to execute FILE_NAME. */
     tid = thread_create (file_name, PRI_DEFAULT, start_process, p);
     //Before creating, we should put the parent to sleep and wake him up when
     // the child has "loaded" the new program
-    debug_backtrace();
+    intr_disable();
     thread_block();
-    debug_backtrace();
 
     if (tid == TID_ERROR)
 	palloc_free_page (fn_copy); 
@@ -105,7 +105,7 @@ fill_stack(void * stack_ptr, char * cmdline)
     current_ptr -= cmdlen;
 
     // Check for the whole length of the cmdline, and based on that, add word alignment
-    size_t word_align = (cmdlen % 4 == 0 ? 0 : WORD_SIZE - (cmdlen % WORD_SIZE) );
+    size_t word_align = (cmdlen % WORD_SIZE == 0 ? 0 : WORD_SIZE - (cmdlen % WORD_SIZE) );
     current_ptr = push_to_stack(current_ptr, 0x00, word_align);
 
     // Next, add every argument
@@ -149,6 +149,7 @@ start_process (void * data)
     struct thread_param * p = (struct thread_param *) data;
     struct thread * parent = p->parent;
     char *file_name = p->fn_copy;
+    printf("File name: '%s'\n", file_name);
 
     struct intr_frame if_;
     bool success;
@@ -161,7 +162,9 @@ start_process (void * data)
     success = load (file_name, &if_.eip, &if_.esp);
 
     // Set up the stack
+    printf("Filling stack ...");
     fill_stack(&if_.esp, file_name);
+    printf("Done.\n");
 
     /* If load failed, quit. */
     palloc_free_page (file_name);
@@ -170,6 +173,7 @@ start_process (void * data)
 
     // Wake up the parent
     thread_unblock(parent);
+    intr_set_level(p->parent_intr_level);
 
     // Free thread_param struct
     free(p);
