@@ -35,6 +35,7 @@ typedef struct parent_child
     tid_t child_id;
     /* Parent's thread structure */
     struct thread * parent_thread;
+
 } pc_t;
 
 /* Keep track of parent-child pairs */

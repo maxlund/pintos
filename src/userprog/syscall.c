@@ -1,6 +1,5 @@
 #include "userprog/syscall.h"
 #include "userprog/process.h"
-#include <stdio.h>
 #include <syscall-nr.h>
 #include "threads/interrupt.h"
 #include "threads/thread.h"
@@ -32,9 +31,6 @@ void syscall_init (void)
 static void syscall_handler (struct intr_frame *f UNUSED)
 {
     const char *name;
-#if 0
-    struct thread * parent;
-#endif
     int * ptr;
     int fd; // file descriptor
     int exit_code;
@@ -42,6 +38,7 @@ static void syscall_handler (struct intr_frame *f UNUSED)
 
     void *stack_ptr = f->esp; // stack pointer
     int *call_code = (int*)stack_ptr; // the call code
+
     stack_ptr += sizeof(int); // increment beyond syscall code
 
     switch (*call_code)
@@ -188,11 +185,7 @@ static void syscall_handler (struct intr_frame *f UNUSED)
             break;
         case SYS_EXIT:         // Parse code, 4-byte integer
             exit_code = *(int *) stack_ptr;
-#if 0
-            parent = thread_current()->parent;
-            parent->child_exit_code = exit_code;
-            thread_unblock(parent);
-#endif
+
             int type = 0;
             int index = get_index_of_thread( thread_current()->tid, &type );
 
@@ -247,23 +240,12 @@ static void syscall_handler (struct intr_frame *f UNUSED)
             ptr = (int *) stack_ptr;
             if (!ptr || (void *) ptr > PHYS_BASE)
             {
+                printf("Bad request:%p\n", (void*)ptr);
                 f->eax = -1;
             }
             else
             {
-#if 0
-                tid_t child_id = process_execute((char *)ptr);
-                struct thread * ct = thread_current();
-
-                // if we have filled 10 children, reallocate space for 10 more
-                if (ct->nr_children > 0 && ct->nr_children % 10 == 0)
-                {
-                    ct->children = (tid_t *) realloc(ct->children, sizeof *ct->children * (10 +
-                                ct->nr_children));
-                }
-
-                ct->children[ct->nr_children++] = child_id;
-#endif
+                printf("Request to exec the file at %p\n", (void*)ptr);
                 pc_t p;
                 tid_t child_id = process_execute( (char *) ptr );
 

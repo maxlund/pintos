@@ -20,6 +20,8 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 
+#define BYTE_BELOW_PHYS_BASE(X) (X - 1)
+
 #define WORD_SIZE   4 /* Bytes in every stack word */
 
 static thread_func start_process NO_RETURN;
@@ -34,6 +36,8 @@ static bool load (const char *cmdline, void (**eip) (void), void **esp);
 tid_t
 process_execute (const char *file_name)
 {
+    printf("file_name:\t%p\n", (void*)file_name);
+    printf("&file_name:\t%p\n", (void*)&file_name);
     char *fn_copy;
     tid_t tid;
 
@@ -115,67 +119,10 @@ static void * push_to_stack(void * init_address, uint32_t data, size_t nr_bytes)
     else
     {
         // If single bytes are to be copied, just use memcpy
+        init_address -= nr_bytes;
         memcpy(init_address, &data, nr_bytes);
     }
     return init_address;
-}
-
-/* Fills the stack */
-    static void *
-fill_stack(void * stack_ptr, char * cmdline)
-{
-    char *token, *save_ptr;
-    // init the arg count
-    int argc = 0;
-    size_t cmdlen = 0;
-    void * current_ptr = stack_ptr;
-
-    for (token = strtok_r (cmdline, " ", &save_ptr); token != NULL;
-            token = strtok_r (NULL, " ", &save_ptr))
-    {
-        argc++;
-        cmdlen += (strlen(token) + 1); // Account for the \0 byte (+1)
-    }
-
-    // Now, copy all cmdline bytes
-    memcpy(stack_ptr - (cmdlen - 1), cmdline, cmdlen);
-    current_ptr -= cmdlen;
-
-    // Check for the whole length of the cmdline, and based on that, add word alignment
-    size_t word_align = (cmdlen % WORD_SIZE == 0 ? 0 : WORD_SIZE - (cmdlen % WORD_SIZE) );
-    current_ptr = push_to_stack(current_ptr, 0x00, word_align);
-
-    // Next, add every argument
-    current_ptr = push_to_stack(current_ptr, 0x00, WORD_SIZE);
-
-    // Get the pointers to each argv
-    size_t n = 0;
-    for (size_t i = cmdlen - 1; n < argc; --i)
-    {
-        if ( *(cmdline + i) == '\0')
-        {
-            ++n;
-            if (i < cmdlen - 1)
-            {
-                if (*(cmdline + i + 1) != '\0')
-                    // Only now we want to push this pointer to the stack
-                    current_ptr = push_to_stack(current_ptr, (uint32_t) (cmdline + i + 1), WORD_SIZE);
-            }
-        }
-    }
-    // Push the first word, i.e., argv[0]
-    current_ptr = push_to_stack(current_ptr, (uint32_t) cmdline, WORD_SIZE);
-
-    // Finally, push both argv and argc
-    //
-    // Note that at this point, 'cmdline' holds a pointer to the first argv[0], so
-    // &cmdline is its memory address, i.e., argv **
-    current_ptr = push_to_stack(current_ptr, (uint32_t ) &cmdline, WORD_SIZE); // Memory address of argv* !!
-    current_ptr = push_to_stack(current_ptr, argc, WORD_SIZE);
-    // Return address --> not needed ...
-    current_ptr = push_to_stack(current_ptr, 0x00, WORD_SIZE);
-
-    return current_ptr;
 }
 
 /* A thread function that loads a user process and starts it
@@ -185,8 +132,8 @@ start_process (void * data)
 {
     struct thread_param * p = (struct thread_param *) data;
     struct thread * parent = p->parent;
-    char *file_name = p->fn_copy;
-    printf("File name: '%s'\n", file_name);
+    char *cmdline = p->fn_copy;
+    printf("File name: '%s'\n", cmdline);
 
     struct intr_frame if_;
     bool success;
@@ -196,19 +143,83 @@ start_process (void * data)
     if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
     if_.cs = SEL_UCSEG;
     if_.eflags = FLAG_IF | FLAG_MBS;
-    success = load (file_name, &if_.eip, &if_.esp);
+
+    // #########################################################################
+    // ######################### Stack filling #################################
+    // #########################################################################
+    char *token, *save_ptr;
+    // init the arg count
+    int argc = 0;
+    size_t cmdlen = 0;
+    char * argv[100];
+    for (token = strtok_r (cmdline, " ", &save_ptr); token != NULL;
+            token = strtok_r (NULL, " ", &save_ptr))
+    {
+        cmdlen += (strlen(token) + 1); // Account for the \0 byte (+1)
+        argv[argc++] = token;
+    }
+
+    success = load (cmdline, &if_.eip, &if_.esp);
 
     // Set up the stack
-    printf("Filling stack ...");
-    void * ptr = fill_stack(if_.esp, file_name);
-    *(void ** )if_.esp = ptr;
+    printf("Filling stack ...\n");
+
+    // we want to dereference **esp to get the actual stack pointer
+    void * current_ptr = BYTE_BELOW_PHYS_BASE(if_.esp);
+
+    printf("%d args in this command line\n", argc);
+
+    // Now, copy all cmdline bytes
+    current_ptr -= (cmdlen-1);
+    memcpy(current_ptr, cmdline, cmdlen);
+
+    // Check for the whole length of the cmdline, and based on that, add word alignment
+    size_t word_align = (cmdlen % WORD_SIZE == 0 ? 0 : WORD_SIZE - (cmdlen % WORD_SIZE) );
+    current_ptr = push_to_stack(current_ptr, 0x00, word_align);
+
+    // Next, add every argument
+    current_ptr = push_to_stack(current_ptr, 0x00, WORD_SIZE);
+
+    const void * cmdline_start = current_ptr + WORD_SIZE + word_align;
+
+    // Get the pointers to each argv
+    size_t offset = 0;
+    for (size_t i = 0; i < argc; ++i)
+    {
+        // Calculate offset with respect to cmdline_start
+        for (size_t j = 0; j < argc - i - 1; ++j)
+            offset += strlen(argv[j]) + 1;
+
+        current_ptr = push_to_stack(current_ptr,
+                (uint32_t) (cmdline_start + offset),
+                WORD_SIZE);
+        // Reset offset
+        offset = 0;
+    }
+
+    current_ptr = push_to_stack(current_ptr,
+            (uint32_t ) current_ptr,
+            WORD_SIZE); // Memory address of argv* !!
+
+    current_ptr = push_to_stack(current_ptr, argc, WORD_SIZE);
+    // Return address --> not needed ...
+    current_ptr = push_to_stack(current_ptr, 0x00, WORD_SIZE);
+
+
+    // #########################################################################
+    // #########################################################################
+
+    // Update the stack ptr
+    if_.esp = current_ptr;
     printf("Done. if_.esp = %p, *if_.esp = %p\n", if_.esp, *(void**)if_.esp);
 
-    print_stack(&if_.esp, false);
+
+    print_stack(&if_.esp, true);
+
 
 
     /* If load failed, quit. */
-    palloc_free_page (file_name);
+    palloc_free_page (cmdline);
     if (!success)
 	thread_exit ();
 
@@ -217,10 +228,9 @@ start_process (void * data)
 //     intr_set_level(p->parent_intr_level);
 
     // Free thread_param struct
-    printf("Freeing 'p'...");
     free(p);
-    printf("Done.\nStarting user process...");
 
+    printf("Starting user process...\n");
     /* Start the user process by simulating a return from an
        interrupt, implemented by intr_exit (in
        threads/intr-stubs.S).  Because intr_exit takes all of its
@@ -229,7 +239,6 @@ start_process (void * data)
        and jump to it. */
     asm volatile ("movl %0, %%esp; jmp intr_exit" : : "g" (&if_) : "memory");
     NOT_REACHED ();
-    printf("Done! Process should be running by now ...\n");
 }
 
 /* Waits for thread TID to die and returns its exit status.  If
@@ -399,16 +408,14 @@ load (const char *file_name, void (**eip) (void), void **esp)
     /* Uncomment the following line to print some debug
        information. This will be useful when you debug the program
        stack.*/
-#define STACK_DEBUG
+// #define STACK_DEBUG
 
 #ifdef STACK_DEBUG
     print_stack(esp, true);
 #endif
 
-    printf("Opening file ...");
     /* Open executable file. */
     file = filesys_open (file_name);
-    printf("Done. file ptr is (%p)\n", (void*)file);
     if (file == NULL)
     {
 	printf ("load: %s: open failed\n", file_name);
