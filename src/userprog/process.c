@@ -54,7 +54,7 @@ process_execute (const char *file_name, pc_t * ptr)
     tid = thread_create (file_name, PRI_DEFAULT, start_process, p);
     //Before creating, we should put the parent to sleep and wake him up when
     // the child has "loaded" the new program
-    printf("(blocking parent=%p)\n", thread_current());
+//     printf("(blocking parent=%p)\n", thread_current());
     intr_disable();
     thread_block();
 
@@ -206,7 +206,7 @@ start_process (void * data)
 	thread_exit ();
 
     // Wake up the parent
-    printf("(unblocking parent=%p)\n", (void*) parent);
+//     printf("(unblocking parent=%p)\n", (void*) parent);
     thread_unblock(parent);
 
     // Free thread_param struct
@@ -235,13 +235,15 @@ int
 process_wait (tid_t child_tid UNUSED)
 {
     // Block the current thread and wait until the child has exited / been
-    // terminated. Only then will this thread by unblocked and the child's
-    // exit code will be already set in the 'parent_child_pairs' array.
-    intr_disable();
-    thread_block();
+    // terminated.
+    //
+    // Need to check first if child has already exited. If not, then dont
+    // bother blocking
+    struct thread * ct = thread_current();
+
     
     // Parse the parent-child structure of the current thread
-    struct list * children = &thread_current()->parent_children;
+    struct list * children = &ct->parent_children;
     struct list_elem * e; 
     int exit_status = -1;
 
@@ -255,6 +257,22 @@ process_wait (tid_t child_tid UNUSED)
         if (current->child_id == child_tid)
         {
             exit_status = current->child_exit_status;
+
+            // Now check: if exit_status is the initial dummy status, then it is still running
+            if (exit_status == CHILD_INIT_EXIT_STATUS)
+            {
+//                 printf("Will block thread=%p\n", (void *) ct);
+                intr_disable();
+                thread_block();
+                // Once unblocked, break and return the newly set exit code
+                // This new exit code will have been set by the child upon SYS_EXIT call
+                exit_status = current->child_exit_status;
+                break;
+            }
+            else
+            {
+                break;
+            }
         }
     }
     return exit_status;

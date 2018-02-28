@@ -13,6 +13,9 @@
 #include "filesys/filesys.h"
 #include "filesys/file.h"
 
+/* Set it to 0 to run the tests */
+#define     PRINT   0
+
 static void syscall_handler (struct intr_frame *);
 
 /* Lock to use when adding up the global counter */
@@ -191,6 +194,8 @@ static void syscall_handler (struct intr_frame *f UNUSED)
             struct list this_threads_children = cth->parent_children;
             pc_t * parent_child         = cth->parent_thread;
 
+#if PRINT
+            printf("SYS_EXIT handler!\n");
             printf("I am                 :\t%p\n", (void *) cth);
             printf("My parent is         :\t%p\n", (void *) my_parent);
             printf("My Thread-ID is      :\t%d\n", my_tid);
@@ -205,11 +210,11 @@ static void syscall_handler (struct intr_frame *f UNUSED)
                      (my_parent->status == THREAD_READY ? "[ready]":
                       (my_parent->status == THREAD_BLOCKED ? "[blocked]":"[dying]"))));
             printf("parent_child         :\t%p\n", (void *) parent_child);
+#endif
 
             if (!list_empty(&this_threads_children))
             {
                 // Then we need to free
-                printf("Ended up here\n");
             }
             // Only set the exit code if I have a valid parent
             if (parent_child) 
@@ -228,6 +233,10 @@ static void syscall_handler (struct intr_frame *f UNUSED)
             break;
         case SYS_EXEC:
             ptr = (int *) stack_ptr;
+#if PRINT
+            printf("SYS_EXEC handler! I am %p and want to execute something at %p\n",
+                    (void *) thread_current(), (void *) ptr);
+#endif
             if (!ptr || (void *) ptr > PHYS_BASE)
             {
                 f->eax = -1;
@@ -253,6 +262,9 @@ static void syscall_handler (struct intr_frame *f UNUSED)
 
                     // Add it to the list
                     struct thread * ct = thread_current();
+#if PRINT
+                    printf("SYS_EXEC running, ct=%p\n", (void *) ct);
+#endif
                     list_push_back(&ct->parent_children, &p->list_element);
                     // Release lock
                     lock_release(&l);

@@ -137,7 +137,7 @@ thread_tick (void)
 void
 thread_print_stats (void) 
 {
-  printf ("Thread: %lld idle ticks, %lld kernel ticks, %lld user ticks\n",
+    printf ("Thread: %lld idle ticks, %lld kernel ticks, %lld user ticks\n",
           idle_ticks, kernel_ticks, user_ticks);
 }
 
@@ -207,7 +207,7 @@ thread_create (const char *name, int priority,
   /* Add to run queue. */
   thread_unblock (t);
 
-  printf("child thread created=%p\n", (void *)t);
+//   printf("child thread created=%p\n", (void *)t);
 
   return tid;
 }
