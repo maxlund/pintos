@@ -50,8 +50,10 @@ process_execute (const char *file_name, pc_t * ptr)
     p->parent = ptr;
     p->parent_thread = thread_current();
 
+    printf("Creating thread to execute ...\n");
     /* Create a new thread to execute FILE_NAME. */
     tid = thread_create (file_name, PRI_DEFAULT, start_process, p);
+    printf("Done! Current thread %p will be blocked until child process '%s' starts!\n", thread_current(), file_name);
     //Before creating, we should put the parent to sleep and wake him up when
     // the child has "loaded" the new program
 //     printf("(blocking parent=%p)\n", thread_current());
@@ -151,7 +153,9 @@ start_process (void * data)
         argv[argc++] = token;
     }
 
+    printf("Loading new process '%s' ...\n", cmdline);
     success = load (cmdline, &if_.eip, &if_.esp);
+    printf("Done!\n");
 
     // Set up the stack
     // we want to dereference **esp to get the actual stack pointer
@@ -206,11 +210,13 @@ start_process (void * data)
 	thread_exit ();
 
     // Wake up the parent
-//     printf("(unblocking parent=%p)\n", (void*) parent);
+    printf("(unblocking parent=%p, meaning that it will resume execution...). %p should be up and running!\n", (void*) parent, (void*) thread_current());
     thread_unblock(parent);
 
     // Free thread_param struct
     free(p);
+
+    printf("&if_ = %p\n", (void *) &if_);
 
     /* Start the user process by simulating a return from an
        interrupt, implemented by intr_exit (in

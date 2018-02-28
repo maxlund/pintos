@@ -14,7 +14,7 @@
 #include "filesys/file.h"
 
 /* Set it to 0 to run the tests */
-#define     PRINT   0
+#define     PRINT   1
 
 static void syscall_handler (struct intr_frame *);
 
@@ -233,18 +233,18 @@ static void syscall_handler (struct intr_frame *f UNUSED)
             break;
         case SYS_EXEC:
             ptr = (int *) stack_ptr;
-#if PRINT
-            printf("SYS_EXEC handler! I am %p and want to execute something at %p\n",
-                    (void *) thread_current(), (void *) ptr);
-#endif
             if (!ptr || (void *) ptr > PHYS_BASE)
             {
                 f->eax = -1;
             }
             else
             {
+#if PRINT
+            printf("SYS_EXEC handler! I am %p and want to execute something at %p ('%s')\n",
+                    (void *) thread_current(), (void *) ptr, (char*) * ptr);
+#endif
                 pc_t * p  = (pc_t * ) malloc (sizeof *p);
-                tid_t child_id = process_execute( (char *) ptr, p);
+                tid_t child_id = process_execute( (char *) * ptr, p);
 
                 if (child_id == TID_ERROR)
                 {
