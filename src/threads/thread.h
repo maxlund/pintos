@@ -4,9 +4,6 @@
 #include <list.h>
 #include <stdint.h>
 
-/* How many parent-child pairs */
-uint64_t parent_child_nr;
-
 /* States in a thread's life cycle. */
 enum thread_status
   {
@@ -25,6 +22,9 @@ typedef int tid_t;
 #define PRI_MIN 0                       /* Lowest priority. */
 #define PRI_DEFAULT 31                  /* Default priority. */
 #define PRI_MAX 63                      /* Highest priority. */
+
+/* Maximum number of open files at the same time */
+#define MAX_OPEN_FILES 128
 
 /* A kernel thread or user process.
 
@@ -100,19 +100,31 @@ struct thread
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
      uint32_t *pagedir;                  /* Page directory. */
-     struct file * file_arr[128];
-#if 0
-     tid_t * children;
-     uint64_t nr_children;
-     struct thread * parent;
-     size_t child_exit_code;
-#endif
-
+     struct file * file_arr[MAX_OPEN_FILES];
+     struct list parent_children;
+     /* Parent's thread structure */
+     struct parent_child * parent_thread;
+     struct thread * parent;            /* ptr to my parent */
 #endif
 
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
   };
+
+typedef struct parent_child
+{
+    /* Child's exit status */
+    int child_exit_status;
+    /* Who is alive */
+    int alive_count;
+    /* Child's thread ID */
+    tid_t child_id;
+    /* My thread ptr */
+    struct thread * parent_thread;
+    /* List element */
+    struct list_elem list_element;
+
+} pc_t;
 
 /* If false (default), use round-robin scheduler.
    If true, use multi-level feedback queue scheduler.

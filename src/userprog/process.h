@@ -13,42 +13,22 @@
 #define THREAD_CHILD    0x01
 #define THREAD_NONE     -1
 
+// Stack word size
+#define WORD_SIZE       0x04
 
-/*
- * Function:	    get_index_of_thread_
- * Brief:	        Given a thread id, it returns the position of the parent-child
-                    structure in 'parent-child-pairs' and determines if it corres-
-                    ponds to a child or parent id in the named array..
- * @param child_id:	The thread ID to look for
- * Returns:	        The index in the array, or -1 if it was not found. is_parent is
- *                  updated accordingly
- */
-int get_index_of_thread(tid_t id, int * is_parent);
+// Convenience macro to start filling the stack at exactly PHYS_BASE - 1
+#define BYTE_BELOW_PHYS_BASE(X) (X - 1)
 
-typedef struct parent_child
-{
-    /* Child's exit status */
-    int child_exit_status;
-    /* Who is alive */
-    int alive_count;
-    /* Child's thread ID */
-    tid_t child_id;
-    /* Parent's thread structure */
-    struct thread * parent_thread;
-
-} pc_t;
-
-/* Keep track of parent-child pairs */
-pc_t * parent_child_pairs;
 
 struct thread_param
 {
    char * fn_copy;
-   struct thread * parent;
    enum intr_level parent_intr_level;
+   struct parent_child * parent;
+   struct thread * parent_thread;
 };
 
-tid_t process_execute (const char *file_name);
+tid_t process_execute (const char *file_name, pc_t * ptr);
 int process_wait (tid_t);
 void process_exit (void);
 void process_activate (void);

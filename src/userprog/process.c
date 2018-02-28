@@ -1,5 +1,4 @@
 #include "userprog/process.h"
-#include <debug.h>
 #include <inttypes.h>
 #include <round.h>
 #include <stdio.h>
@@ -20,10 +19,6 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 
-#define BYTE_BELOW_PHYS_BASE(X) (X - 1)
-
-#define WORD_SIZE   4 /* Bytes in every stack word */
-
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 
@@ -34,19 +29,15 @@ static bool load (const char *cmdline, void (**eip) (void), void **esp);
    thread id, or TID_ERROR if the thread cannot be created. */
 
 tid_t
-process_execute (const char *file_name)
+process_execute (const char *file_name, pc_t * ptr)
 {
-    printf("file_name:\t%p\n", (void*)file_name);
-    printf("&file_name:\t%p\n", (void*)&file_name);
     char *fn_copy;
     tid_t tid;
 
-    debug_backtrace();
     /* Make a copy of FILE_NAME.
        Otherwise there's a race between the caller and load(). */
     fn_copy = palloc_get_page (0);
 
-    debug_backtrace();
     if (fn_copy == NULL)
 	return TID_ERROR;
     strlcpy (fn_copy, file_name, PGSIZE);
@@ -54,14 +45,16 @@ process_execute (const char *file_name)
     // Fill the thread params struct
     struct thread_param  * p = (struct thread_param *) malloc (sizeof *p);
     p->fn_copy = fn_copy;
-    p->parent = thread_current();
     p->parent_intr_level = intr_get_level();
+    // Set the child's parent ptr
+    p->parent = ptr;
+    p->parent_thread = thread_current();
 
-    debug_backtrace();
     /* Create a new thread to execute FILE_NAME. */
     tid = thread_create (file_name, PRI_DEFAULT, start_process, p);
     //Before creating, we should put the parent to sleep and wake him up when
     // the child has "loaded" the new program
+    printf("(blocking parent=%p)\n", thread_current());
     intr_disable();
     thread_block();
 
@@ -130,10 +123,14 @@ static void * push_to_stack(void * init_address, uint32_t data, size_t nr_bytes)
 static void
 start_process (void * data)
 {
+    char *token, *save_ptr;
+    // init the arg count
+    int argc = 0;
+    size_t cmdlen = 0;
+    char * argv[100];
     struct thread_param * p = (struct thread_param *) data;
-    struct thread * parent = p->parent;
+    struct thread * parent = p->parent_thread;
     char *cmdline = p->fn_copy;
-    printf("File name: '%s'\n", cmdline);
 
     struct intr_frame if_;
     bool success;
@@ -147,11 +144,6 @@ start_process (void * data)
     // #########################################################################
     // ######################### Stack filling #################################
     // #########################################################################
-    char *token, *save_ptr;
-    // init the arg count
-    int argc = 0;
-    size_t cmdlen = 0;
-    char * argv[100];
     for (token = strtok_r (cmdline, " ", &save_ptr); token != NULL;
             token = strtok_r (NULL, " ", &save_ptr))
     {
@@ -162,12 +154,8 @@ start_process (void * data)
     success = load (cmdline, &if_.eip, &if_.esp);
 
     // Set up the stack
-    printf("Filling stack ...\n");
-
     // we want to dereference **esp to get the actual stack pointer
     void * current_ptr = BYTE_BELOW_PHYS_BASE(if_.esp);
-
-    printf("%d args in this command line\n", argc);
 
     // Now, copy all cmdline bytes
     current_ptr -= (cmdlen-1);
@@ -211,12 +199,6 @@ start_process (void * data)
 
     // Update the stack ptr
     if_.esp = current_ptr;
-    printf("Done. if_.esp = %p, *if_.esp = %p\n", if_.esp, *(void**)if_.esp);
-
-
-    print_stack(&if_.esp, true);
-
-
 
     /* If load failed, quit. */
     palloc_free_page (cmdline);
@@ -224,13 +206,12 @@ start_process (void * data)
 	thread_exit ();
 
     // Wake up the parent
+    printf("(unblocking parent=%p)\n", (void*) parent);
     thread_unblock(parent);
-//     intr_set_level(p->parent_intr_level);
 
     // Free thread_param struct
     free(p);
 
-    printf("Starting user process...\n");
     /* Start the user process by simulating a return from an
        interrupt, implemented by intr_exit (in
        threads/intr-stubs.S).  Because intr_exit takes all of its
@@ -258,16 +239,25 @@ process_wait (tid_t child_tid UNUSED)
     // exit code will be already set in the 'parent_child_pairs' array.
     intr_disable();
     thread_block();
+    
+    // Parse the parent-child structure of the current thread
+    struct list * children = &thread_current()->parent_children;
+    struct list_elem * e; 
+    int exit_status = -1;
 
-#if 0
-   return thread_current()->child_exit_code;
-#endif
-
-   // Look for the child's structure in the array
-   int type = 0;
-   int index = get_index_of_thread (child_tid, &type);
-
-   return (index != -1 ? (parent_child_pairs + index)->child_exit_status : -1);
+    for (e = list_begin(children);
+            e != list_end(children);
+            e = list_next(e))
+    {
+        // Parse the current entry
+        pc_t * current = list_entry(e, pc_t, list_element);
+        // Check for my ID: then return that exit code
+        if (current->child_id == child_tid)
+        {
+            exit_status = current->child_exit_status;
+        }
+    }
+    return exit_status;
 }
 
 /* Free the current process's resources. */
@@ -411,7 +401,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
 // #define STACK_DEBUG
 
 #ifdef STACK_DEBUG
-    print_stack(esp, true);
+//     print_stack(esp, true);
 #endif
 
     /* Open executable file. */
@@ -651,25 +641,5 @@ install_page (void *upage, void *kpage, bool writable)
        address, then map our page there. */
     return (pagedir_get_page (t->pagedir, upage) == NULL
 	    && pagedir_set_page (t->pagedir, upage, kpage, writable));
-}
-
-int get_index_of_thread(tid_t id, int * is_parent)
-{
-    for (unsigned i = 0; i < parent_child_nr; ++i)
-    {
-        pc_t * p = parent_child_pairs + i;
-        if (p->child_id == id)
-        {
-            *is_parent = THREAD_CHILD;
-            return i;
-        }
-        if (p->parent_thread->tid == id)
-        {
-            *is_parent = THREAD_PARENT;
-            return i;
-        }
-    }
-    *is_parent = THREAD_NONE;
-    return -1;
 }
 

@@ -22,8 +22,6 @@ void syscall_init (void)
 {
     intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
 
-    // Allocate memory for the parent-child pairs
-    parent_child_pairs = (pc_t * ) malloc (sizeof *parent_child_pairs * 100);
     // Init lock object
     lock_init(&l);
 }
@@ -39,7 +37,7 @@ static void syscall_handler (struct intr_frame *f UNUSED)
     void *stack_ptr = f->esp; // stack pointer
     int *call_code = (int*)stack_ptr; // the call code
 
-    stack_ptr += sizeof(int); // increment beyond syscall code
+    stack_ptr += sizeof(WORD_SIZE); // increment beyond syscall code
 
     switch (*call_code)
     {
@@ -48,7 +46,7 @@ static void syscall_handler (struct intr_frame *f UNUSED)
             break;
         case SYS_CREATE:
             name = (char *)*(int *)stack_ptr; // parse name from next stack word
-            stack_ptr += sizeof(int); // go to next word
+            stack_ptr += sizeof(WORD_SIZE); // go to next word
             off_t initial_size = *(off_t*)stack_ptr; // get the number of bytes of file to
 
             if (name && initial_size >= 0)
@@ -99,11 +97,11 @@ static void syscall_handler (struct intr_frame *f UNUSED)
             fd = *(int *) stack_ptr;
             if ((fd > 1 && fd < 128) || fd == 0)
             {
-                stack_ptr += sizeof(int); // Increment stack ptr beyond the fd - 4bytes
+                stack_ptr += sizeof(WORD_SIZE); // Increment stack ptr beyond the fd - 4bytes
                 char * buf = (char *) * (int *)stack_ptr;  // dereference next stack word
                 //to char*
                 char * tmpbuf = buf; // Make a copy of this pointer
-                stack_ptr += sizeof(int); // Go to next stack word
+                stack_ptr += sizeof(WORD_SIZE); // Go to next stack word
                 off_t size = *(int *)(stack_ptr); // Nr of chars to read
                 off_t bytes_read = 0;
                 if (fd == 0) // Read from stdin
@@ -146,12 +144,12 @@ static void syscall_handler (struct intr_frame *f UNUSED)
             fd = *(int *) stack_ptr;
             if (fd > 0 && fd < 128)
             {
-                stack_ptr += sizeof(int); // Increment stack ptr beyond the fd (next word)
+                stack_ptr += sizeof(WORD_SIZE); // Increment stack ptr beyond the fd (next word)
 
                 // dereference next stack word to char*
                 const char * buf = (char *) * (int *)stack_ptr;
 
-                stack_ptr += sizeof(int); // Increment to next word
+                stack_ptr += sizeof(WORD_SIZE); // Increment to next word
                 off_t size = *(int *)(stack_ptr); // Bytes to write
                 // Check if fd corresponds to stdout, in that case use putbuf() function
                 if (fd == 1)
@@ -186,49 +184,41 @@ static void syscall_handler (struct intr_frame *f UNUSED)
         case SYS_EXIT:         // Parse code, 4-byte integer
             exit_code = *(int *) stack_ptr;
 
-            int type = 0;
-            int index = get_index_of_thread( thread_current()->tid, &type );
+            // First: check if the current thread has some children
+            struct thread * cth         = thread_current();
+            struct thread * my_parent   = cth->parent;
+            tid_t my_tid                = cth->tid;
+            struct list this_threads_children = cth->parent_children;
+            pc_t * parent_child         = cth->parent_thread;
 
-            if (index != -1)
+            printf("I am                 :\t%p\n", (void *) cth);
+            printf("My parent is         :\t%p\n", (void *) my_parent);
+            printf("My Thread-ID is      :\t%d\n", my_tid);
+            printf("My children list is  :\t%p\n", (void *)&this_threads_children);
+            printf(" |---->is it empty???:\t%s\n", (list_empty(&this_threads_children) ? "YES":"NO"));
+            printf("My thread status is  :\t%s\n",
+                    (cth->status == THREAD_RUNNING ? "[running]" :
+                     (cth->status == THREAD_READY ? "[ready]":
+                      (cth->status == THREAD_BLOCKED ? "[blocked]":"[dying]"))));
+            printf("My parent status is  :\t%s\n",
+                    (my_parent->status == THREAD_RUNNING ? "[running]" :
+                     (my_parent->status == THREAD_READY ? "[ready]":
+                      (my_parent->status == THREAD_BLOCKED ? "[blocked]":"[dying]"))));
+            printf("parent_child         :\t%p\n", (void *) parent_child);
+
+            if (!list_empty(&this_threads_children))
             {
-                lock_acquire(&l);
-
-                pc_t * p = parent_child_pairs + index;
-                // Decrease alive count
-                p->alive_count--;
-                // Update exit code only if 'type' is set to THREAD_CHILD
-                if (type == THREAD_CHILD)
-                {
-                    p->child_exit_status = exit_code;
-                    // check if my parent is blocked (probably waiting for me)
-                    if (p->parent_thread->status == THREAD_BLOCKED)
-                    {
-                        thread_unblock(p->parent_thread);
-                    }
-                }
-                else
-                {
-                    // update parent to a 'non-existent' status
-                    p->parent_thread = NULL;
-                }
-
-                // Check: if alive count is now 0, we should free memory
-                if (p->alive_count == 0)
-                {
-                    // Decrement the number of parent & child pairs
-                    parent_child_nr--;
-                }
-
-                lock_release(&l);
+                // Then we need to free
+                printf("Ended up here\n");
             }
-            // Check open files this process has
-            struct thread * current_thread = thread_current();
-            struct file * fl;
-            for (int fd = 2; fd < 130; ++fd)
+            // Only set the exit code if I have a valid parent
+            if (parent_child) 
             {
-                fl = current_thread->file_arr[fd - 2]; // Account for offset
-                if (fl) file_close(fl);
+                // Then we need to set the exit code and decrease the alive count of the parent
+                parent_child->child_exit_status = exit_code;
+                parent_child->alive_count--;
             }
+
 
             // Important to pass the tests
             printf("%s: exit(%d)\n", thread_name(), exit_code);
@@ -240,14 +230,12 @@ static void syscall_handler (struct intr_frame *f UNUSED)
             ptr = (int *) stack_ptr;
             if (!ptr || (void *) ptr > PHYS_BASE)
             {
-                printf("Bad request:%p\n", (void*)ptr);
                 f->eax = -1;
             }
             else
             {
-                printf("Request to exec the file at %p\n", (void*)ptr);
-                pc_t p;
-                tid_t child_id = process_execute( (char *) ptr );
+                pc_t * p  = (pc_t * ) malloc (sizeof *p);
+                tid_t child_id = process_execute( (char *) ptr, p);
 
                 if (child_id == TID_ERROR)
                 {
@@ -259,14 +247,13 @@ static void syscall_handler (struct intr_frame *f UNUSED)
                     // Acquire lock
                     lock_acquire(&l);
 
-                    p.child_exit_status = CHILD_INIT_EXIT_STATUS;
-                    p.alive_count = 0x02;
-                    p.child_id = child_id;
-                    p.parent_thread = thread_current();
+                    p->child_exit_status = CHILD_INIT_EXIT_STATUS;
+                    p->alive_count = 0x02;
+                    p->child_id = child_id;
 
-                    // Add it to the array
-                    *(parent_child_pairs + parent_child_nr++) = p;
-
+                    // Add it to the list
+                    struct thread * ct = thread_current();
+                    list_push_back(&ct->parent_children, &p->list_element);
                     // Release lock
                     lock_release(&l);
 

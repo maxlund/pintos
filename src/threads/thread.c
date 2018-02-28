@@ -180,13 +180,6 @@ thread_create (const char *name, int priority,
   /* Initialize thread. */
   init_thread (t, name, priority);
   tid = t->tid = allocate_tid ();
-#if 0
-#ifdef USERPROG
-  // Allocate memory for the children array (10 to start with)
-  t->children = (tid_t *) malloc (sizeof *t->children * 10);
-  t->parent = p->parent;
-#endif
-#endif
   
    /* Stack frame for kernel_thread(). */
   kf = alloc_frame (t, sizeof *kf);
@@ -202,8 +195,19 @@ thread_create (const char *name, int priority,
   sf = alloc_frame (t, sizeof *sf);
   sf->eip = switch_entry;
 
+  // Check: if p->parent is NULL, just omit this
+  if (p->parent)
+  {
+      // Then update t's 'parent_thread' field with p
+      t->parent_thread = p;
+  }
+    
+  // set the parent
+  t->parent = p->parent_thread;
   /* Add to run queue. */
   thread_unblock (t);
+
+  printf("child thread created=%p\n", (void *)t);
 
   return tid;
 }
@@ -294,10 +298,7 @@ thread_exit (void)
      We will be destroyed during the call to schedule_tail(). */
   intr_disable ();
   thread_current ()->status = THREAD_DYING;
-#if 0
-  // Free up the children array
-  free(thread_current()->children);
-#endif
+
   schedule ();
   NOT_REACHED ();
 }
@@ -450,6 +451,9 @@ init_thread (struct thread *t, const char *name, int priority)
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
   t->magic = THREAD_MAGIC;
+
+  // Init the parent-child list
+  list_init(&t->parent_children);
 }
 
 /* Allocates a SIZE-byte frame at the top of thread T's stack and
