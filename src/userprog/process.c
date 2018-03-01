@@ -19,11 +19,10 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 
+#define     PROCESS_PRINT   1
+
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
-
-static tid_t first_child = TID_ERROR;
-
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -49,8 +48,31 @@ process_execute (const char *file_name, pc_t * ptr)
     struct thread_param  * p = (struct thread_param *) malloc (sizeof *p);
     p->fn_copy = fn_copy;
     p->parent_intr_level = intr_get_level();
-    // Set the child's parent ptr
-    p->parent = ptr;
+    /* Set the child's parent ptr
+
+       If this function is called by the main thread, then we need to set the
+       parent-child pair right here, since from threads/init.c we dont set any
+       interrupt frame structure. The only way to know this is by looking at ptr:
+       if it is NULL, that means that the caller of this function was the main
+       thread, otherwise it was called by children of main in the syscall handler.
+       */
+    if (!ptr)
+    {
+        ptr = (pc_t * ) malloc (sizeof *ptr);
+        ptr->child_exit_status = CHILD_INIT_EXIT_STATUS;
+        ptr->alive_count = 0x02;
+        /* ptr->child_id shall be filled when the thread has been created */
+        // The main thread is the parent of the child to be created
+        ptr->parent_thread = thread_current();
+
+        // Finally, add this element to my list
+        list_push_back(&thread_current()->parent_children, &ptr->list_element);
+    }
+    else
+    {
+        // This functino was called via syscall handler -> ptr is valid!
+        p->parent = ptr;
+    }
     p->parent_thread = thread_current();
 
     printf("Creating thread to execute ...");
@@ -58,10 +80,10 @@ process_execute (const char *file_name, pc_t * ptr)
     tid = thread_create (file_name, PRI_DEFAULT, start_process, p);
     printf(tid != TID_ERROR ? "[Done]\n"  : "[ERROR]\n");
 
-    // Update the first_child iif ptr is null, i.e., when the main thread starts
-    if (!ptr && thread_current()->tid == 1) 
+    if (thread_current()->tid == 1) 
     {
-        first_child =  tid;
+        // Update the child id
+        ptr->child_id = tid;
     }
 
     printf("Current thread [%p,'%s',%d] will be blocked until child process ['%s',%d] starts!\n"
@@ -274,18 +296,10 @@ process_wait (tid_t child_tid UNUSED)
             (void *)ct, thread_name(), ct->tid, child_tid,
             list_empty(children) ? "is empty" : "contains something");
 
-    // Wait if my TID=1, i.e., if I am the main thread
-    if (ct->tid == 1)
-    {
-        printf("[process_wait] Main thread is about to be blocked!\n");
-        thread_block();
-    } 
-
     for (e = list_begin(children);
             e != list_end(children);
             e = list_next(e))
     {
-        printf("[list] Looping through the list\n");
         // Parse the current entry
         pc_t * current = list_entry(e, pc_t, list_element);
         // Check for my ID: then return that exit code
