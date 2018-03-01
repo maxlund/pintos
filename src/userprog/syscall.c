@@ -32,7 +32,7 @@ void syscall_init (void)
 static void syscall_handler (struct intr_frame *f UNUSED)
 {
     const char *name;
-    int * ptr;
+    void * ptr; // ptr to hold the command to execute with exec
     int fd; // file descriptor
     int exit_code;
     tid_t child_id;
@@ -232,19 +232,31 @@ static void syscall_handler (struct intr_frame *f UNUSED)
             thread_exit();
             break;
         case SYS_EXEC:
-            ptr = (int *) stack_ptr;
-            if (!ptr || (void *) ptr > PHYS_BASE)
+            ptr = (void *) ( * (int *) stack_ptr);
+#if PRINT
+            printf("SYS_EXEC handler! Received ptr:\t%p\n", (char *) ptr);
+#endif
+            if (!ptr || ptr > PHYS_BASE)
             {
+#if PRINT
+                printf("Bad ptr received:\t%p\n", (void *) ptr);
+#endif
                 f->eax = -1;
             }
             else
             {
 #if PRINT
-            printf("SYS_EXEC handler! I am %p and want to execute something at %p ('%s')\n",
-                    (void *) thread_current(), (void *) ptr, (char*) * ptr);
+                printf("SYS_EXEC handler! Address '%p' seems legit, it reads '%s'. Let's execute it!\n",
+                        ptr, (char * ) ptr);
 #endif
                 pc_t * p  = (pc_t * ) malloc (sizeof *p);
-                tid_t child_id = process_execute( (char *) * ptr, p);
+                tid_t child_id = process_execute( (char *) ptr, p);
+
+#if PRINT
+                printf("SYS_EXEC handler! I am %p and want to execute something at %p ('%s')."
+                        "In return, I got a child-ID:%d\n",
+                        (void *) thread_current(), (void *) ptr, (char*) ptr, child_id);
+#endif
 
                 if (child_id == TID_ERROR)
                 {
@@ -276,6 +288,9 @@ static void syscall_handler (struct intr_frame *f UNUSED)
             break;
         case SYS_WAIT:
             child_id = *(int *)stack_ptr;
+#if PRINT
+            printf("SYS_WAIT handler! Want to wait for child-ID %d to execute\n", child_id);
+#endif
             if (child_id == TID_ERROR)
             {
                 f->eax = -1;
@@ -284,6 +299,7 @@ static void syscall_handler (struct intr_frame *f UNUSED)
             {
                 f->eax = process_wait(child_id);
             }
+            break;
     }
 }
 

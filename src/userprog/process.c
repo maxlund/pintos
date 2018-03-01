@@ -50,18 +50,21 @@ process_execute (const char *file_name, pc_t * ptr)
     p->parent = ptr;
     p->parent_thread = thread_current();
 
-    printf("Creating thread to execute ...\n");
+    printf("Creating thread to execute ...");
     /* Create a new thread to execute FILE_NAME. */
     tid = thread_create (file_name, PRI_DEFAULT, start_process, p);
-    printf("Done! Current thread %p will be blocked until child process '%s' starts!\n", thread_current(), file_name);
+    printf(tid != TID_ERROR ? "[Done]\n"  : "[ERROR]\n");
+
+    printf("Current thread %p will be blocked until child process '%s' starts!\n",
+            (void *) thread_current(), file_name);
     //Before creating, we should put the parent to sleep and wake him up when
     // the child has "loaded" the new program
-//     printf("(blocking parent=%p)\n", thread_current());
     intr_disable();
     thread_block();
 
     if (tid == TID_ERROR)
-	palloc_free_page (fn_copy);
+        palloc_free_page (fn_copy);
+
     return tid;
 }
 
@@ -137,6 +140,8 @@ start_process (void * data)
     struct intr_frame if_;
     bool success;
 
+    printf("****Starting process! Will load '%s' and set up its stack!\n", cmdline);
+
     /* Initialize interrupt frame and load executable. */
     memset (&if_, 0, sizeof if_);
     if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
@@ -153,9 +158,9 @@ start_process (void * data)
         argv[argc++] = token;
     }
 
-    printf("Loading new process '%s' ...\n", cmdline);
+    printf("Loading new process '%s' ...", cmdline);
     success = load (cmdline, &if_.eip, &if_.esp);
-    printf("Done!\n");
+    printf(success ? "[Done]!\n." : "[Fail]\n");
 
     // Set up the stack
     // we want to dereference **esp to get the actual stack pointer
@@ -253,10 +258,15 @@ process_wait (tid_t child_tid UNUSED)
     struct list_elem * e; 
     int exit_status = -1;
 
+    printf("Will check if I (%p - TID:%d) need to wait for my child-ID %d. My children list '%s'\n",
+            (void *)ct, ct->tid, child_tid,
+            list_empty(children) ? "is empty" : "contains something");
+
     for (e = list_begin(children);
             e != list_end(children);
             e = list_next(e))
     {
+        printf("[list] Looping through the list\n");
         // Parse the current entry
         pc_t * current = list_entry(e, pc_t, list_element);
         // Check for my ID: then return that exit code
