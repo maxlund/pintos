@@ -200,7 +200,7 @@ static void syscall_handler (struct intr_frame *f UNUSED)
             printf("My parent is         :\t%p\n", (void *) my_parent);
             printf("My Thread-ID is      :\t%d\n", my_tid);
             printf("My children list is  :\t%p\n", (void *)&this_threads_children);
-            printf(" |---->is it empty???:\t%s\n", (list_empty(&this_threads_children) ? "YES":"NO"));
+            printf(" |---->is it empty???:\t%s\n", (list_size(&this_threads_children) == 0) ? "YES":"NO");
             printf("My thread status is  :\t%s\n",
                     (cth->status == THREAD_RUNNING ? "[running]" :
                      (cth->status == THREAD_READY ? "[ready]":
@@ -222,6 +222,12 @@ static void syscall_handler (struct intr_frame *f UNUSED)
                 // Then we need to set the exit code and decrease the alive count of the parent
                 parent_child->child_exit_status = exit_code;
                 parent_child->alive_count--;
+#if PRINT
+                printf("Updated exit code to:\t%d. Alive count for this pair is:\t%u\n",
+                        parent_child->child_exit_status, parent_child->alive_count);
+#endif
+                // And unblock the parent
+//                 thread_unblock(cth->parent);
             }
 
 
@@ -232,10 +238,9 @@ static void syscall_handler (struct intr_frame *f UNUSED)
             thread_exit();
             break;
         case SYS_EXEC:
+
             ptr = (void *) ( * (int *) stack_ptr);
-#if PRINT
-            printf("SYS_EXEC handler! Received ptr:\t%p\n", (char *) ptr);
-#endif
+
             if (!ptr || ptr > PHYS_BASE)
             {
 #if PRINT
@@ -274,10 +279,10 @@ static void syscall_handler (struct intr_frame *f UNUSED)
 
                     // Add it to the list
                     struct thread * ct = thread_current();
-#if PRINT
-                    printf("SYS_EXEC running, ct=%p\n", (void *) ct);
-#endif
+
+                    printf("Size before:\t%d\n", list_size(&ct->parent_children));
                     list_push_back(&ct->parent_children, &p->list_element);
+                    printf("Size after:\t%d\n", list_size(&ct->parent_children));
                     // Release lock
                     lock_release(&l);
 

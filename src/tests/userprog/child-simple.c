@@ -11,7 +11,5 @@ int
 main (void) 
 {
   msg ("run");
-  unsigned int max = 0xffffffff;
-  for (unsigned int i=0; i < max; ++i) {}
   return 81;
 }

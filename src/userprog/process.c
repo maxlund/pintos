@@ -22,6 +22,8 @@
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 
+static tid_t first_child = TID_ERROR;
+
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -42,6 +44,7 @@ process_execute (const char *file_name, pc_t * ptr)
 	return TID_ERROR;
     strlcpy (fn_copy, file_name, PGSIZE);
 
+
     // Fill the thread params struct
     struct thread_param  * p = (struct thread_param *) malloc (sizeof *p);
     p->fn_copy = fn_copy;
@@ -55,8 +58,17 @@ process_execute (const char *file_name, pc_t * ptr)
     tid = thread_create (file_name, PRI_DEFAULT, start_process, p);
     printf(tid != TID_ERROR ? "[Done]\n"  : "[ERROR]\n");
 
-    printf("Current thread %p will be blocked until child process '%s' starts!\n",
-            (void *) thread_current(), file_name);
+    // Update the first_child iif ptr is null, i.e., when the main thread starts
+    if (!ptr && thread_current()->tid == 1) 
+    {
+        first_child =  tid;
+    }
+
+    printf("Current thread [%p,'%s',%d] will be blocked until child process ['%s',%d] starts!\n"
+            "ptr is %p, meaning that this is%s the main thread!\n",
+            (void *) thread_current(), thread_name(), thread_current()->tid,
+            file_name, tid,
+            (void*) ptr, !ptr ? "" : " NOT");
     //Before creating, we should put the parent to sleep and wake him up when
     // the child has "loaded" the new program
     intr_disable();
@@ -160,7 +172,7 @@ start_process (void * data)
 
     printf("Loading new process '%s' ...", cmdline);
     success = load (cmdline, &if_.eip, &if_.esp);
-    printf(success ? "[Done]!\n." : "[Fail]\n");
+    printf(success ? "[Done]!\n" : "[Fail]\n");
 
     // Set up the stack
     // we want to dereference **esp to get the actual stack pointer
@@ -258,9 +270,16 @@ process_wait (tid_t child_tid UNUSED)
     struct list_elem * e; 
     int exit_status = -1;
 
-    printf("Will check if I (%p - TID:%d) need to wait for my child-ID %d. My children list '%s'\n",
-            (void *)ct, ct->tid, child_tid,
+    printf("[process_wait] Will check if I [%p,'%s',%d] need to wait for my child-ID %d. My children list '%s'\n",
+            (void *)ct, thread_name(), ct->tid, child_tid,
             list_empty(children) ? "is empty" : "contains something");
+
+    // Wait if my TID=1, i.e., if I am the main thread
+    if (ct->tid == 1)
+    {
+        printf("[process_wait] Main thread is about to be blocked!\n");
+        thread_block();
+    } 
 
     for (e = list_begin(children);
             e != list_end(children);
@@ -273,16 +292,18 @@ process_wait (tid_t child_tid UNUSED)
         if (current->child_id == child_tid)
         {
             exit_status = current->child_exit_status;
+            printf("Found my child '%d'! Updating its exit status: %d\n", child_tid, exit_status);
 
             // Now check: if exit_status is the initial dummy status, then it is still running
             if (exit_status == CHILD_INIT_EXIT_STATUS)
             {
-//                 printf("Will block thread=%p\n", (void *) ct);
+                printf("Will block myself=%p (tid=%d)\n", (void *) ct, ct->tid);
                 intr_disable();
                 thread_block();
                 // Once unblocked, break and return the newly set exit code
                 // This new exit code will have been set by the child upon SYS_EXIT call
                 exit_status = current->child_exit_status;
+                printf("I was unblocked! My child's exit status was:\t%d\n", exit_status);
                 break;
             }
             else
