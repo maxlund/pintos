@@ -14,13 +14,15 @@
 #include "filesys/file.h"
 
 /* Set it to 0 to run the tests */
-#define     PRINT   1
+#define     PRINT   0
 
 static void syscall_handler (struct intr_frame *);
+static struct lock l;
 
 void syscall_init (void)
 {
     intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
+    lock_init(&l);
 }
 
 static void syscall_handler (struct intr_frame *f UNUSED)
@@ -181,20 +183,21 @@ static void syscall_handler (struct intr_frame *f UNUSED)
         case SYS_EXIT:         // Parse code, 4-byte integer
             exit_code = *(int *) stack_ptr;
 
+            lock_acquire(&l);
             // First: check if the current thread has some children
             struct thread * cth         = thread_current();
             struct thread * my_parent   = cth->parent;
             tid_t my_tid                = cth->tid;
-            struct list this_threads_children = cth->parent_children_list;
+            struct list * this_threads_children = &cth->parent_children_list;
             pc_t * parent_child         = cth->parent_child_link;
-
+            
 #if PRINT
             printf("SYS_EXIT handler!\n");
             printf("I am                 :\t%p\n", (void *) cth);
             printf("My parent is         :\t%p\n", (void *) my_parent);
             printf("My Thread-ID is      :\t%d\n", my_tid);
-            printf("My children list is  :\t%p\n", (void *)&this_threads_children);
-            printf(" |---->is it empty???:\t%s\n", (list_size(&this_threads_children) == 0) ? "YES":"NO");
+            printf("My children list is  :\t%p\n", (void *)this_threads_children);
+            printf(" |---->is it empty???:\t%s\n", (list_size(this_threads_children) == 0) ? "YES":"NO");
             printf("My thread status is  :\t%s\n",
                     (cth->status == THREAD_RUNNING ? "[running]" :
                      (cth->status == THREAD_READY ? "[ready]":
@@ -204,7 +207,10 @@ static void syscall_handler (struct intr_frame *f UNUSED)
                      (my_parent->status == THREAD_READY ? "[ready]":
                       (my_parent->status == THREAD_BLOCKED ? "[blocked]":"[dying]"))));
             printf("parent_child         :\t%p\n", (void *) parent_child);
+          
 #endif
+            
+            lock_release(&l);
 
             if (!list_empty(&this_threads_children))
             {
@@ -220,8 +226,6 @@ static void syscall_handler (struct intr_frame *f UNUSED)
                 printf("Updated exit code to:\t%d. Alive count for this pair is:\t%u\n",
                         parent_child->child_exit_status, parent_child->alive_count);
 #endif
-                // And unblock the parent
-//                 thread_unblock(cth->parent);
             }
 
 
@@ -229,7 +233,13 @@ static void syscall_handler (struct intr_frame *f UNUSED)
             printf("%s: exit(%d)\n", thread_name(), exit_code);
 
             // Exit
-            thread_exit();
+            if (my_parent->tid == 1)
+               if (my_parent->status == THREAD_BLOCKED)
+                  thread_unblock(my_parent);
+            
+            if (cth->tid != 1)
+               thread_exit();
+            
             break;
         case SYS_EXEC:
 

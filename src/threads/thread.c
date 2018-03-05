@@ -92,7 +92,6 @@ thread_init (void)
   init_thread (initial_thread, "main", PRI_DEFAULT);
   initial_thread->status = THREAD_RUNNING;
   initial_thread->tid = allocate_tid ();
-  lock_init(&initial_thread->thread_lock);
 }
 
 /* Starts preemptive thread scheduling by enabling interrupts.
@@ -201,10 +200,13 @@ thread_create (const char *name, int priority,
     
   // set the parent
   t->parent = p->parent_thread;
+  list_init(&t->parent_children_list);
+  lock_init(&t->thread_lock);
+
   /* Add to run queue. */
   thread_unblock (t);
 
-//   printf("child thread created=%p\n", (void *)t);
+  /* printf("child thread created=%p tid=%d, list=%p\n", (void *)t, tid, (void*)&t->parent_children_list); */
 
   return tid;
 }

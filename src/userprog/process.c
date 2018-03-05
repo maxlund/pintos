@@ -39,27 +39,26 @@ process_execute (const char *file_name)
     tid_t tid;
     struct thread * ct = thread_current();
 
-    printf("I am %p [name=%s] and want to execute something: '%s'.",
-            (void *) ct, thread_name(), file_name);
 
-    /* if (l) */
-    /* { */
-    /*     lock_init(l); */
-    /* } */
+    //printf("I am %p [name=%s], my list is: %p, and want to execute something: '%s'.\n",
+    //     (void *) ct, thread_name(), (void *)&ct->parent_children_list, file_name);    
+    
+
     // Acquire lock
     lock_acquire(&ct->thread_lock);
-
+    
     pc_t * parent_child_ptr = (pc_t *) malloc (sizeof *parent_child_ptr);
 
     parent_child_ptr->child_exit_status = CHILD_INIT_EXIT_STATUS;
     parent_child_ptr->alive_count = 0x02;
     // The main thread is the parent of the child to be created
     parent_child_ptr->parent_thread = ct;
+    parent_child_ptr->has_exited = false;
 
     // Add it to the list
-    printf("Size before:\t%d\n", list_size(&ct->parent_children_list));
+    //printf("Size before:\t%d\n", list_size(&ct->parent_children_list));
     list_push_back(&ct->parent_children_list, &parent_child_ptr->list_element);
-    printf("Size after:\t%d\n", list_size(&ct->parent_children_list));
+    //printf("Size after:\t%d\n", list_size(&ct->parent_children_list));
 
     // Release lock
     lock_release(&ct->thread_lock);
@@ -79,10 +78,11 @@ process_execute (const char *file_name)
     arguments->parent_thread = ct;
     arguments->parent_child_link = parent_child_ptr;
 
-    printf("Creating thread to execute ...");
+    //printf("Creating thread to execute ...");
     /* Create a new thread to execute FILE_NAME. */
+//    printf("FILE NAME: %s\n", file_name);
     tid = thread_create (file_name, PRI_DEFAULT, start_process, (void*) arguments);
-    printf(tid != TID_ERROR ? "[Done]\n"  : "[ERROR]\n");
+    //printf(tid != TID_ERROR ? "[Done]\n"  : "[ERROR]\n");
 
     // Update the child id
     if (tid == TID_ERROR)
@@ -93,13 +93,12 @@ process_execute (const char *file_name)
     }
     else
     {
-        printf("Current thread [%p,'%s',%d] will be blocked until child process ['%s',%d] starts!\n"
-                "ptr is %p, meaning that this is%s the main thread!\n",
-                (void *) ct, thread_name(), ct->tid,
-                file_name, tid,
-                (void*) parent_child_ptr, !parent_child_ptr ? "" : " NOT");
+       //printf("Current thread [%p,'%s',%d] will be blocked until child process ['%s',%d] starts!\n",
+       // (void *) ct, thread_name(), ct->tid,
+       //     file_name, tid);
         //Before creating, we should put the parent to sleep and wake him up when
         // the child has "loaded" the new program
+       parent_child_ptr->child_id = tid;
         intr_disable();
         thread_block();
     }
@@ -175,11 +174,12 @@ start_process (void * data)
     struct child_arguments * p = (struct child_arguments *) data;
     struct thread * parent = p->parent_thread;
     char *cmdline = p->fn_copy;
+    printf("Cmdline='%s'\n", cmdline);
 
     struct intr_frame if_;
     bool success;
 
-    printf("****Starting process! Will load '%s' and set up its stack!\n", cmdline);
+    //printf("****Starting process! Will load '%s' and set up its stack!\n", cmdline);
 
     /* Initialize interrupt frame and load executable. */
     memset (&if_, 0, sizeof if_);
@@ -190,16 +190,47 @@ start_process (void * data)
     // #########################################################################
     // ######################### Stack filling #################################
     // #########################################################################
+    char * tmp = (char *) malloc (sizeof *tmp * 200);
+    unsigned j = 0;
     for (token = strtok_r (cmdline, " ", &save_ptr); token != NULL;
             token = strtok_r (NULL, " ", &save_ptr))
     {
-        cmdlen += (strlen(token) + 1); // Account for the \0 byte (+1)
+       for (unsigned i = 0; i < strlen(token); i++)
+       {
+
+          if (token[i] != " ")
+          {
+             tmp[j] = token[i];
+             j++;
+          }
+       }
+
+       tmp[j++] = '\0';
+       cmdlen += (strlen(token) + 1); // Account for the \0 byte (+1)
+        /* memcpy(tmp, token, strlen(token)); */
+        /* memset(tmp + strlen(token), 0, 1); */
+        /* tmp += strlen(token); */
         argv[argc++] = token;
     }
+    
+    // reset tmp
+    printf("printing tmp: \n");
+    for (uint8_t i=0; i<cmdlen; ++i)
+    {
+       if (tmp[i] == 0)
+          printf("\\0");
+       else
+          printf("%c", tmp[i]);
+    }
+    printf("\n");
+    
+    // Set the tokenized thread name
+    const char * name = thread_current()->name;
+    memset(name, 0, strlen(name));
+    memcpy(name, argv[0], strlen(argv[0]));
 
-    printf("Loading new process '%s' ...", cmdline);
+    printf("Loading new process '%s' ...\n", cmdline);
     success = load (cmdline, &if_.eip, &if_.esp);
-    printf(success ? "[Done]!\n" : "[Fail]\n");
 
     // Set up the stack
     // we want to dereference **esp to get the actual stack pointer
@@ -207,7 +238,8 @@ start_process (void * data)
 
     // Now, copy all cmdline bytes
     current_ptr -= (cmdlen-1);
-    memcpy(current_ptr, cmdline, cmdlen);
+//    memcpy(current_ptr, cmdline, cmdlen);
+    memcpy(current_ptr, tmp, cmdlen);
 
     // Check for the whole length of the cmdline, and based on that, add word alignment
     size_t word_align = (cmdlen % WORD_SIZE == 0 ? 0 : WORD_SIZE - (cmdlen % WORD_SIZE) );
@@ -226,6 +258,8 @@ start_process (void * data)
         for (size_t j = 0; j < argc - i - 1; ++j)
             offset += strlen(argv[j]) + 1;
 
+        printf("String is='%s'\n", (char *) (cmdline_start + offset));
+        
         current_ptr = push_to_stack(current_ptr,
                 (uint32_t) (cmdline_start + offset),
                 WORD_SIZE);
@@ -254,13 +288,13 @@ start_process (void * data)
         thread_exit ();
 
     // Wake up the parent
-    printf("(unblocking parent=%p, meaning that it will resume execution...). %p should be up and running!\n", (void*) parent, (void*) thread_current());
+    //printf("(unblocking parent=%p, meaning that it will resume execution...). %p should be up and running!\n", (void*) parent, (void*) thread_current());
     thread_unblock(parent);
 
     // Free child_arguments struct
     free(p);
 
-    printf("&if_ = %p\n", (void *) &if_);
+    //printf("&if_ = %p\n", (void *) &if_);
 
     /* Start the user process by simulating a return from an
        interrupt, implemented by intr_exit (in
@@ -291,38 +325,37 @@ process_wait (tid_t child_tid UNUSED)
     // bother blocking
     struct thread * ct = thread_current();
 
-
     // Parse the parent-child structure of the current thread
     struct list * children = &ct->parent_children_list;
     struct list_elem * e; 
     int exit_status = -1;
 
-    printf("[process_wait] Will check if I [%p,'%s',%d] need to wait for my child-ID %d. My children list '%s'\n",
-            (void *)ct, thread_name(), ct->tid, child_tid,
-            list_empty(children) ? "is empty" : "contains something");
+    //printf("[process_wait] Will check if I [%p,'%s',%d] need to wait for my child-ID %d. My children list '%s'\n",
+    //(void *)ct, thread_name(), ct->tid, child_tid,
+    // list_empty(children) ? "is empty" : "contains something");
 
-    for (e = list_begin(children);
-            e != list_end(children);
-            e = list_next(e))
+    for (e = list_begin(children); e != list_end(children); e = list_next(e))
     {
         // Parse the current entry
         pc_t * current = list_entry(e, pc_t, list_element);
         // Check for my ID: then return that exit code
-        if (current->child_id == child_tid)
+        //printf("current->childid: %d, child_id: %d\n", current->child_id, child_tid);
+        if (current->child_id == child_tid && !current->has_exited)
         {
             exit_status = current->child_exit_status;
-            printf("Found my child '%d'! Updating its exit status: %d\n", child_tid, exit_status);
+            //printf("Found my child '%d'! Updating its exit status: %d\n", child_tid, exit_status);
+            current->has_exited = true;
 
             // Now check: if exit_status is the initial dummy status, then it is still running
             if (exit_status == CHILD_INIT_EXIT_STATUS)
             {
-                printf("Will block myself=%p (tid=%d)\n", (void *) ct, ct->tid);
+                //printf("Will block myself=%p (tid=%d)\n", (void *) ct, ct->tid);
                 intr_disable();
                 thread_block();
                 // Once unblocked, break and return the newly set exit code
                 // This new exit code will have been set by the child upon SYS_EXIT call
                 exit_status = current->child_exit_status;
-                printf("I was unblocked! My child's exit status was:\t%d\n", exit_status);
+                //printf("I (%s) was unblocked! My child's exit status was:\t%d\n", thread_name(), exit_status);
                 break;
             }
             else

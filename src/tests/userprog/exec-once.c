@@ -7,8 +7,5 @@
 void
 test_main (void) 
 {
-    int pid = exec("child-simple");
-    msg("Success! PID=%d\n", pid);
-    wait (pid);
-    msg ("Done!\n");
+    wait (exec ("child-simple"));
 }

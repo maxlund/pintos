@@ -114,7 +114,8 @@ main (void)
   disk_init ();
   filesys_init (format_filesys);
 #endif
-
+  list_init(&thread_current()->parent_children_list);
+  lock_init(&thread_current()->thread_lock);
   printf ("Boot complete.\n");
   
   /* Run actions specified on kernel command line. */
@@ -123,6 +124,7 @@ main (void)
   /* Finish up. */
   if (power_off_when_done)
     power_off ();
+
   thread_exit ();
 }
 
@@ -364,11 +366,9 @@ power_off (void)
 {
   const char s[] = "Shutdown";
   const char *p;
-
 #ifdef FILESYS
   filesys_done ();
 #endif
-
   print_stats ();
 
   printf ("Powering off...\n");

@@ -93,7 +93,7 @@ struct thread
     uint8_t *stack;                     /* Saved stack pointer. */
     int priority;                       /* Priority. */
     int64_t wait_time; // wait time
-     struct lock thread_lock;
+    struct lock thread_lock;
 
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
@@ -121,6 +121,8 @@ typedef struct parent_child
     int alive_count;
     /* Child's thread ID */
     tid_t child_id;
+   /* Child has returned its exit status */
+   bool has_exited;
     /* My thread ptr */
     struct thread * parent_thread;
     /* List element */
