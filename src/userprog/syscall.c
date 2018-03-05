@@ -18,15 +18,9 @@
 
 static void syscall_handler (struct intr_frame *);
 
-/* Lock to use when adding up the global counter */
-static struct lock l;
-
 void syscall_init (void)
 {
     intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
-
-    // Init lock object
-    lock_init(&l);
 }
 
 static void syscall_handler (struct intr_frame *f UNUSED)
@@ -191,8 +185,8 @@ static void syscall_handler (struct intr_frame *f UNUSED)
             struct thread * cth         = thread_current();
             struct thread * my_parent   = cth->parent;
             tid_t my_tid                = cth->tid;
-            struct list this_threads_children = cth->parent_children;
-            pc_t * parent_child         = cth->parent_thread;
+            struct list this_threads_children = cth->parent_children_list;
+            pc_t * parent_child         = cth->parent_child_link;
 
 #if PRINT
             printf("SYS_EXIT handler!\n");
@@ -250,45 +244,7 @@ static void syscall_handler (struct intr_frame *f UNUSED)
             }
             else
             {
-#if PRINT
-                printf("SYS_EXEC handler! Address '%p' seems legit, it reads '%s'. Let's execute it!\n",
-                        ptr, (char * ) ptr);
-#endif
-                pc_t * p  = (pc_t * ) malloc (sizeof *p);
-                tid_t child_id = process_execute( (char *) ptr, p);
-
-#if PRINT
-                printf("SYS_EXEC handler! I am %p and want to execute something at %p ('%s')."
-                        "In return, I got a child-ID:%d\n",
-                        (void *) thread_current(), (void *) ptr, (char*) ptr, child_id);
-#endif
-
-                if (child_id == TID_ERROR)
-                {
-                    // Then return -1
-                    f->eax = -1;
-                }
-                else
-                {
-                    // Acquire lock
-                    lock_acquire(&l);
-
-                    p->child_exit_status = CHILD_INIT_EXIT_STATUS;
-                    p->alive_count = 0x02;
-                    p->child_id = child_id;
-
-                    // Add it to the list
-                    struct thread * ct = thread_current();
-
-                    printf("Size before:\t%d\n", list_size(&ct->parent_children));
-                    list_push_back(&ct->parent_children, &p->list_element);
-                    printf("Size after:\t%d\n", list_size(&ct->parent_children));
-                    // Release lock
-                    lock_release(&l);
-
-                    // And return the child id
-                    f->eax = child_id;
-                }
+                f->eax = process_execute( (char *) ptr);
             }
             break;
         case SYS_WAIT:

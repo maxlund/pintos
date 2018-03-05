@@ -1,5 +1,5 @@
 #ifndef THREADS_THREAD_H
-#define THREADS_THREAD_H 
+#define THREADS_THREAD_H
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
@@ -91,7 +91,7 @@ struct thread
     char name[16];                      /* Name (for debugging purposes). */
     uint8_t *stack;                     /* Saved stack pointer. */
     int priority;                       /* Priority. */
-    int64_t wait_time; // wait time 
+    int64_t wait_time; // wait time
 
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
@@ -101,9 +101,9 @@ struct thread
     /* Owned by userprog/process.c. */
      uint32_t *pagedir;                  /* Page directory. */
      struct file * file_arr[MAX_OPEN_FILES];
-     struct list parent_children;
+     struct list parent_children_list;
      /* Parent's thread structure */
-     struct parent_child * parent_thread;
+     struct parent_child * parent_child_link;
      struct thread * parent;            /* ptr to my parent */
 #endif
 

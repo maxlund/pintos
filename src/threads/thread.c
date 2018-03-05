@@ -164,13 +164,13 @@ thread_create (const char *name, int priority,
   struct kernel_thread_frame *kf;
   struct switch_entry_frame *ef;
   struct switch_threads_frame *sf;
-  struct thread_param * p;
+  struct child_arguments * p;
   tid_t tid;
 
   ASSERT (function != NULL);
 
-  // Cast back the thread_param struct
-  p = (struct thread_param *) aux;
+  // Cast back the child_arguments struct
+  p = (struct child_arguments *) aux;
 
   /* Allocate thread. */
   t = palloc_get_page (PAL_ZERO);
@@ -185,7 +185,7 @@ thread_create (const char *name, int priority,
   kf = alloc_frame (t, sizeof *kf);
   kf->eip = NULL;
   kf->function = function;
-  kf->aux = p;
+  kf->aux = (void *) p;
 
   /* Stack frame for switch_entry(). */
   ef = alloc_frame (t, sizeof *ef);
@@ -195,12 +195,8 @@ thread_create (const char *name, int priority,
   sf = alloc_frame (t, sizeof *sf);
   sf->eip = switch_entry;
 
-  // Check: if p->parent is NULL, just omit this
-  if (p->parent)
-  {
-      // Then update t's 'parent_thread' field with p
-      t->parent_thread = p;
-  }
+  // update t's 'parent_thread' field with p
+  t->parent_child_link = p->parent_child_link;
     
   // set the parent
   t->parent = p->parent_thread;
@@ -453,7 +449,7 @@ init_thread (struct thread *t, const char *name, int priority)
   t->magic = THREAD_MAGIC;
 
   // Init the parent-child list
-  list_init(&t->parent_children);
+  list_init(&t->parent_children_list);
 }
 
 /* Allocates a SIZE-byte frame at the top of thread T's stack and
