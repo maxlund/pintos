@@ -22,7 +22,7 @@
 #define     PROCESS_PRINT   1
 
 /* Lock to use when adding up the global counter */
-static struct lock * l = NULL;
+//static struct lock * l = NULL;
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
@@ -42,12 +42,12 @@ process_execute (const char *file_name)
     printf("I am %p [name=%s] and want to execute something: '%s'.",
             (void *) ct, thread_name(), file_name);
 
-    if (!l)
-    {
-        lock_init(l);
-    }
+    /* if (l) */
+    /* { */
+    /*     lock_init(l); */
+    /* } */
     // Acquire lock
-    lock_acquire(l);
+    lock_acquire(&ct->thread_lock);
 
     pc_t * parent_child_ptr = (pc_t *) malloc (sizeof *parent_child_ptr);
 
@@ -62,7 +62,7 @@ process_execute (const char *file_name)
     printf("Size after:\t%d\n", list_size(&ct->parent_children_list));
 
     // Release lock
-    lock_release(l);
+    lock_release(&ct->thread_lock);
 
     /* Make a copy of FILE_NAME.
        Otherwise there's a race between the caller and load(). */
