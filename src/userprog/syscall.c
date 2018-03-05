@@ -1,5 +1,6 @@
 #include "userprog/syscall.h"
 #include "userprog/process.h"
+#include "userprog/pagedir.h"
 #include <syscall-nr.h>
 #include "threads/interrupt.h"
 #include "threads/thread.h"
@@ -18,6 +19,25 @@
 
 static void syscall_handler (struct intr_frame *);
 static struct lock l;
+
+/*
+ * Function:	is_valid_address
+ * Brief:	    Given an address range, it checks the validity of each byte, i.e.,
+ *              all bytes shall be in user space
+ * @param addr:	The initial address in the range
+ * @param nr_bytes:	The number of bytes to check
+ * Returns:	    True if every byte in the range is valid, false otherwise
+*/
+static bool is_valid_address(const void * addr, size_t nr_bytes)
+{
+    for (size_t off = 0; off < nr_bytes + 1; ++off)
+    {
+        if ( is_kernel_vaddr(addr + off) || // Address if in kernel space -> bad!
+                pagedir_get_page(thread_current()->pagedir, addr + off) == NULL ) // Address is unmapped -> bad!
+            return false;
+    }
+    return true;
+}
 
 void syscall_init (void)
 {
