@@ -25,7 +25,8 @@ typedef int tid_t;
 #define PRI_MAX 63                      /* Highest priority. */
 
 /* Maximum number of open files at the same time */
-#define MAX_OPEN_FILES 128
+#define MAX_OPEN_FILES 130 // stdin, stdout + 128 regular files
+#define MIN_ALLOWED_FD 2
 
 /* A kernel thread or user process.
 
