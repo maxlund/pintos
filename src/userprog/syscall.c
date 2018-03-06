@@ -9,6 +9,8 @@
 #include "threads/synch.h"
 #include "threads/vaddr.h"
 #include "lib/syscall-nr.h"
+#include "lib/string.h"
+#include "lib/stdio.h"
 #include "lib/user/syscall.h"
 #include "lib/kernel/stdio.h"
 #include "devices/input.h"
@@ -68,41 +70,76 @@ static bool is_valid_string(const char * str)
  */
 static void cleanup(int code)
 {
+    lock_acquire(&l);
+    // First: check if the current thread has some children
     size_t i;
-    struct thread * c = thread_current();
-    struct thread * p = c->parent;
+    struct thread * cth         = thread_current();
+    struct thread * my_parent   = cth->parent;
+    tid_t my_tid                = cth->tid;
+    struct list * this_threads_children = &cth->parent_children_list;
+    pc_t * link                 = cth->parent_child_link;
+
+#if PRINT
+    printf("SYS_EXIT handler!\n");
+    printf("I am                 :\t%p\n", (void *) cth);
+    printf("My parent is         :\t%p\n", (void *) my_parent);
+    printf("My Thread-ID is      :\t%d\n", my_tid);
+    printf("My children list is  :\t%p\n", (void *)this_threads_children);
+    printf(" |---->is it empty???:\t%s\n", (list_size(this_threads_children) == 0) ? "YES":"NO");
+    printf("My thread status is  :\t%s\n",
+            (cth->status == THREAD_RUNNING ? "[running]" :
+             (cth->status == THREAD_READY ? "[ready]":
+              (cth->status == THREAD_BLOCKED ? "[blocked]":"[dying]"))));
+    printf("My parent status is  :\t%s\n",
+            (my_parent->status == THREAD_RUNNING ? "[running]" :
+             (my_parent->status == THREAD_READY ? "[ready]":
+              (my_parent->status == THREAD_BLOCKED ? "[blocked]":"[dying]"))));
+    printf("link         :\t%p\n", (void *) link);
+
+#endif
+
     // Close all open files
     for (i = MIN_ALLOWED_FD; i < MAX_OPEN_FILES; ++i)
     {
-        struct file * f = c->file_arr[i];
+        struct file * f = cth->file_arr[i];
         if (f)
         {
             file_close(f);
-            c->file_arr[i] = NULL;
+            cth->file_arr[i] = NULL;
         }
     }
     // Free all children list entries
     struct list_elem * e;
-    struct list * children = &c->parent_children_list;
 
-    for (e = list_begin(children); e != list_end(children); e = list_next(e))
+    //TODO: fix this, free crashes !!!
+    for (e = list_begin(this_threads_children); e != list_end(this_threads_children); e = list_next(e))
     {
-        // Free the current entry
-        free( list_entry(e, pc_t, list_element) );
+            // Free the current entry
+            pc_t * entry = list_entry(e, pc_t, list_element);
+#if PRINT
+            printf("Freeing list entry %p\n", entry);
+#endif
+//             free( entry );
     }
     // Important to pass the tests
     printf("%s: exit(%d)\n", thread_name(), code);
     // Update my status in my parent's child structure
-    c->parent_child_link->child_exit_status = code;
-    // Exit
-    if (p->tid == 1)
+    if (link)
     {
-        if (p->status == THREAD_BLOCKED)
-        {
-            printf("---------------> unblocking main thread!\n");
-            thread_unblock(p);
-        }
+        link->alive_count--;
+        link->child_exit_status = code;
+#if PRINT
+        printf("Updated exit code to:\t%d. Alive count for this pair is:\t%u\n",
+                link->child_exit_status, link->alive_count);
+#endif
     }
+
+    // Exit & unblock if my parent is the main thread
+    if (my_parent->tid == 1 && my_parent->status == THREAD_BLOCKED)
+        thread_unblock(my_parent);
+
+    lock_release(&l);
+
     // And exit the thread
     thread_exit();
 }
@@ -329,68 +366,9 @@ static void syscall_handler (struct intr_frame *f UNUSED)
         case SYS_EXIT:         // Parse code, 4-byte integer
             exit_code = *(int *) stack_ptr;
 
-            lock_acquire(&l);
-            // First: check if the current thread has some children
-            struct thread * cth         = thread_current();
-            struct thread * my_parent   = cth->parent;
-            tid_t my_tid                = cth->tid;
-            struct list * this_threads_children = &cth->parent_children_list;
-            pc_t * parent_child         = cth->parent_child_link;
-
-#if PRINT
-            printf("SYS_EXIT handler!\n");
-            printf("I am                 :\t%p\n", (void *) cth);
-            printf("My parent is         :\t%p\n", (void *) my_parent);
-            printf("My Thread-ID is      :\t%d\n", my_tid);
-            printf("My children list is  :\t%p\n", (void *)this_threads_children);
-            printf(" |---->is it empty???:\t%s\n", (list_size(this_threads_children) == 0) ? "YES":"NO");
-            printf("My thread status is  :\t%s\n",
-                    (cth->status == THREAD_RUNNING ? "[running]" :
-                     (cth->status == THREAD_READY ? "[ready]":
-                      (cth->status == THREAD_BLOCKED ? "[blocked]":"[dying]"))));
-            printf("My parent status is  :\t%s\n",
-                    (my_parent->status == THREAD_RUNNING ? "[running]" :
-                     (my_parent->status == THREAD_READY ? "[ready]":
-                      (my_parent->status == THREAD_BLOCKED ? "[blocked]":"[dying]"))));
-            printf("parent_child         :\t%p\n", (void *) parent_child);
-
-#endif
-
-            lock_release(&l);
-
-            if (!list_empty(this_threads_children))
-            {
-                // Then we need to free every item on the list
-                // Parse the parent-child structure of the current thread
-                struct list_elem * e;
-                for (e = list_begin(this_threads_children); e != list_end(this_threads_children); e = list_next(e))
-                {
-                    // Free the current entry
-                    free( list_entry(e, pc_t, list_element) );
-                }
-            }
-            // Only set the exit code if I have a valid parent
-            if (parent_child) 
-            {
-                // Then we need to set the exit code and decrease the alive count of the parent
-                parent_child->child_exit_status = exit_code;
-                parent_child->alive_count--;
-#if PRINT
-                printf("Updated exit code to:\t%d. Alive count for this pair is:\t%u\n",
-                        parent_child->child_exit_status, parent_child->alive_count);
-#endif
-            }
-
-            // Important to pass the tests
-            printf("%s: exit(%d)\n", thread_name(), exit_code);
-
             // Exit
-            if (my_parent->tid == 1)
-                if (my_parent->status == THREAD_BLOCKED)
-                    thread_unblock(my_parent);
-
-            if (my_tid != 1)
-                thread_exit();
+            cleanup(exit_code);
+            NOT_REACHED();
 
             break;
         case SYS_EXEC:
