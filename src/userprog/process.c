@@ -98,7 +98,7 @@ process_execute (const char *file_name)
        thread_block();
     }
 
-    return tid;
+    return parent_child_ptr->child_id;
 }
 
 static void print_stack(void ** esp, bool complete)
@@ -277,7 +277,13 @@ start_process (void * data)
     /* If load failed, quit. */
     palloc_free_page (cmdline);
     if (!success)
-        thread_exit ();
+    {
+       p->parent_child_link->child_id = -1;
+       //free(p);
+       free(tmp);
+       thread_unblock(parent);
+       thread_exit();
+    }
 
     // Wake up the parent
 

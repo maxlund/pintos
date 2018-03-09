@@ -135,11 +135,11 @@ static void cleanup(int code)
     }
 
     // Exit & unblock if my parent is the main thread
-    if (my_parent->tid == 1 && my_parent->status == THREAD_BLOCKED)
+    if ( /*my_parent->tid == 1 && */my_parent->status == THREAD_BLOCKED)
         thread_unblock(my_parent);
 
     lock_release(&l);
-
+    
     // And exit the thread
     thread_exit();
 }
@@ -294,7 +294,8 @@ static void syscall_handler (struct intr_frame *f UNUSED)
                              */ 
                             bytes_read = file_read(file, buf, size);
                             // Write either the read bytes or -1 if we didn't read any bytes
-                            f->eax = (bytes_read > 0 ? bytes_read : -1);
+                            //f->eax = (bytes_read > 0 ? bytes_read : -1);
+                            f->eax = bytes_read;
                         }
                         else
                         {
@@ -349,7 +350,8 @@ static void syscall_handler (struct intr_frame *f UNUSED)
                             // register
                             off_t bytes_written = file_write(file, buf, size);
                             // Write either the actual bytes written or -1 if no bytes were written
-                            f->eax = (bytes_written > 0 ? bytes_written : -1);
+                            //f->eax = (bytes_written > 0 ? bytes_written : -1);
+                            f->eax = bytes_written;
                         }
                         else
                         {
