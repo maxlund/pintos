@@ -121,7 +121,7 @@ inode_open (disk_sector_t sector)
   struct list_elem *e;
   struct inode *inode;
 
-  lock_acquire(&global_lock);
+//  lock_acquire(&global_lock);
   /* Check whether this inode is already open. */
   for (e = list_begin (&open_inodes); e != list_end (&open_inodes);
        e = list_next (e)) 
@@ -133,7 +133,7 @@ inode_open (disk_sector_t sector)
           return inode; 
         }
     }
-  lock_release(&global_lock);
+//  lock_release(&global_lock);
 
   /* Allocate memory. */
   inode = malloc (sizeof *inode);
@@ -187,7 +187,7 @@ inode_close (struct inode *inode)
   if (inode == NULL)
     return;
 
-  lock_acquire(&global_lock);
+//  lock_acquire(&global_lock);
   /* Release resources if this was the last opener. */
   if (--inode->open_cnt == 0)
     {
@@ -202,9 +202,9 @@ inode_close (struct inode *inode)
                             bytes_to_sectors (inode->data.length)); 
         }
       free (inode); 
-      lock_release(&global_lock);
+
     }
-  lock_release(&global_lock);
+//  lock_release(&global_lock);
 }
 
 /* Marks INODE to be deleted when it is closed by the last caller who
@@ -213,9 +213,7 @@ void
 inode_remove (struct inode *inode) 
 {
   ASSERT (inode != NULL);
-  lock_acquire(&global_lock);
   inode->removed = true;
-  lock_release(&global_lock);
 }
 
 /* Reads SIZE bytes from INODE into BUFFER, starting at position OFFSET.
@@ -233,6 +231,7 @@ inode_read_at (struct inode *inode, void *buffer_, off_t size, off_t offset)
   // set our write lock if there are active reads
   if (inode->read_count == 1)
      lock_acquire(&inode->rw_lock);
+
   lock_release(&inode->read_count_lock);
 
   while (size > 0) 

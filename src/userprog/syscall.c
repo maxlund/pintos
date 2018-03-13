@@ -39,7 +39,7 @@ static bool is_valid_address(const void * addr, size_t nr_bytes)
     for (size_t off = 0; off < nr_bytes + 1; ++off)
     {
         if ( is_kernel_vaddr(addr + off) || // Address is in kernel space -> bad!
-                pagedir_get_page(thread_current()->pagedir, addr + off) == NULL ) // Address is unmapped -> bad!
+             pagedir_get_page(thread_current()->pagedir, addr + off) == NULL ) // Address is unmapped -> bad!
             return false;
     }
     return true;
@@ -409,7 +409,7 @@ static void syscall_handler (struct intr_frame *f UNUSED)
                 NOT_REACHED();
             }
             fd = *(int *) stack_ptr;
-            stack_ptr += sizeof(WORD_SIZE);
+            stack_ptr += WORD_SIZE;
             off_t pos = *(off_t*)stack_ptr;
             ptr = (void *) ( * (int *) stack_ptr);
 
@@ -420,8 +420,8 @@ static void syscall_handler (struct intr_frame *f UNUSED)
        case SYS_TELL:
        {
           fd = *(int *) stack_ptr;
-          stack_ptr += sizeof(WORD_SIZE);
-          address_to_check = (void *) * (int * ) stack_ptr;
+          stack_ptr += WORD_SIZE;
+          address_to_check = (void *) (int * ) stack_ptr;
 
           if (!is_valid_address(address_to_check, WORD_SIZE))
           {
@@ -436,8 +436,8 @@ static void syscall_handler (struct intr_frame *f UNUSED)
        case SYS_FILESIZE:
        {
           fd = *(int *) stack_ptr;
-          stack_ptr += sizeof(WORD_SIZE);
-          address_to_check = (void *) * (int * ) stack_ptr;
+          stack_ptr += WORD_SIZE;
+          address_to_check = (void *) (int * ) stack_ptr;
 
           if (!is_valid_address(address_to_check, WORD_SIZE))
           {

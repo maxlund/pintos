@@ -20,7 +20,7 @@
 #include "threads/vaddr.h"
 
 /* Change this macro to 1 to output some printouts */
-#define     PROCESS_PRINT   0
+#define     PROCESS_PRINT   1
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
@@ -111,8 +111,7 @@ static void print_stack(void ** esp, bool complete)
         /* It prints every byte as if it was a char and every 32-bit aligned
            data as if it was a pointer. */
         void * ptr_save = PHYS_BASE;
-        int i;
-        i=-15;
+        int i;        i=-15;
         while(ptr_save - i >= *esp) {
             char *whats_there = (char *)(ptr_save - i);
             // show the address ...
