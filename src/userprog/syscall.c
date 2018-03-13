@@ -401,21 +401,20 @@ static void syscall_handler (struct intr_frame *f UNUSED)
             }
             break;
        case SYS_SEEK:
-          fd = *(int *) stack_ptr;
-          stack_ptr += sizeof(WORD_SIZE);
-          off_t pos = *(off_t*)stack_ptr;
-          ptr = (void *) ( * (int *) stack_ptr);
-          // what to check here? is pos we are searching valid adress?
-          // or are we searching for pos?
-          if (!is_valid_address(ptr, WORD_SIZE))
-          {
-             cleanup(-1);
-             NOT_REACHED();
-          }
+            ptr = (void *) stack_ptr; // Check the stack ptr before dereferencing anything
+            if (!is_valid_addrees(ptr, 2 * WORD_SIZE)) // Want to dereference two int* ptrs -> 8 bytes from ptr
+            {
+                cleanup(-1);
+                NOT_REACHED();
+            }
+            fd = *(int *) stack_ptr;
+            stack_ptr += sizeof(WORD_SIZE);
+            off_t pos = *(off_t*)stack_ptr;
+            ptr = (void *) ( * (int *) stack_ptr);
 
-          struct thread *ct = thread_current();
-          return file_seek(ct->file_arr[fd], pos);
-          break;
+            struct thread *ct = thread_current();
+            f->eax = file_seek(ct->file_arr[fd], pos);
+            break;
 
        case SYS_TELL:
           fd = *(int *) stack_ptr;
