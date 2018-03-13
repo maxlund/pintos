@@ -37,8 +37,8 @@ struct inode
    bool removed;                       /* True if deleted, false otherwise. */
    int deny_write_cnt;                 /* 0: writes ok, >0: deny writes. */
    struct inode_disk data;             /* Inode content. */
-   int read_counter;
-   struct lock inode_lock, read_lock, write_lock; 
+   int read_count;
+   struct lock inode_lock, rw_lock, read_count_lock;
 };
 
 /* Returns the disk sector that contains byte offset POS within
@@ -148,10 +148,10 @@ inode_open (disk_sector_t sector)
   inode->removed = false;
 
   // our stuff here
-  inode->read_counter = 0;
+  inode->read_count = 0;
   lock_init(&inode->inode_lock);
-  lock_init(&inode->read_lock);
-  lock_init(&inode->write_lock);
+  lock_init(&inode->read_count_lock);
+  lock_init(&inode->rw_lock);
   disk_read (filesys_disk, inode->sector, &inode->data);
   return inode;
 }
@@ -163,7 +163,9 @@ inode_reopen (struct inode *inode)
   if (inode != NULL) 
     {
       ASSERT(inode->open_cnt != 0);
+      lock_acquire(&inode->inode_lock);
       inode->open_cnt++;
+      lock_release(&inode->inode_lock);
     }
   return inode;
 }
@@ -185,6 +187,7 @@ inode_close (struct inode *inode)
   if (inode == NULL)
     return;
 
+  lock_acquire(&global_lock);
   /* Release resources if this was the last opener. */
   if (--inode->open_cnt == 0)
     {
@@ -198,9 +201,10 @@ inode_close (struct inode *inode)
           free_map_release (inode->data.start,
                             bytes_to_sectors (inode->data.length)); 
         }
-
       free (inode); 
+      lock_release(&global_lock);
     }
+  lock_release(&global_lock);
 }
 
 /* Marks INODE to be deleted when it is closed by the last caller who
@@ -209,7 +213,9 @@ void
 inode_remove (struct inode *inode) 
 {
   ASSERT (inode != NULL);
+  lock_acquire(&global_lock);
   inode->removed = true;
+  lock_release(&global_lock);
 }
 
 /* Reads SIZE bytes from INODE into BUFFER, starting at position OFFSET.
@@ -221,6 +227,13 @@ inode_read_at (struct inode *inode, void *buffer_, off_t size, off_t offset)
   uint8_t *buffer = buffer_;
   off_t bytes_read = 0;
   uint8_t *bounce = NULL;
+
+  lock_acquire(&inode->read_count_lock);
+  inode->read_count++;
+  // set our write lock if there are active reads
+  if (inode->read_count == 1)
+     lock_acquire(&inode->rw_lock);
+  lock_release(&inode->read_count_lock);
 
   while (size > 0) 
     {
@@ -264,6 +277,13 @@ inode_read_at (struct inode *inode, void *buffer_, off_t size, off_t offset)
     }
   free (bounce);
 
+  // read is done, if no readers release lock for writes
+  lock_acquire(&inode->read_count_lock);
+  inode->read_count--;
+  if (inode->read_count == 0)
+     lock_release(&inode->rw_lock);
+  lock_release(&inode->read_count_lock);
+
   return bytes_read;
 }
 
@@ -283,6 +303,7 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
   if (inode->deny_write_cnt)
     return 0;
 
+  lock_acquire(&inode->rw_lock);
   while (size > 0) 
     {
       /* Sector to write, starting byte offset within sector. */
@@ -332,6 +353,7 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
     }
   free (bounce);
 
+  lock_release(&inode->rw_lock);
   return bytes_written;
 }
 
@@ -340,8 +362,10 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
 void
 inode_deny_write (struct inode *inode) 
 {
-  inode->deny_write_cnt++;
-  ASSERT (inode->deny_write_cnt <= inode->open_cnt);
+   lock_acquire(&inode->inode_lock);
+   inode->deny_write_cnt++;
+   ASSERT (inode->deny_write_cnt <= inode->open_cnt);
+   lock_release(&inode->inode_lock);
 }
 
 /* Re-enables writes to INODE.
@@ -350,9 +374,11 @@ inode_deny_write (struct inode *inode)
 void
 inode_allow_write (struct inode *inode) 
 {
-  ASSERT (inode->deny_write_cnt > 0);
-  ASSERT (inode->deny_write_cnt <= inode->open_cnt);
-  inode->deny_write_cnt--;
+   lock_acquire(&inode->inode_lock);
+   ASSERT (inode->deny_write_cnt > 0);
+   ASSERT (inode->deny_write_cnt <= inode->open_cnt);
+   inode->deny_write_cnt--;
+   lock_release(&inode->inode_lock);
 }
 
 /* Returns the length, in bytes, of INODE's data. */

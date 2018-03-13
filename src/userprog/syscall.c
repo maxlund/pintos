@@ -401,8 +401,9 @@ static void syscall_handler (struct intr_frame *f UNUSED)
             }
             break;
        case SYS_SEEK:
+       {
             ptr = (void *) stack_ptr; // Check the stack ptr before dereferencing anything
-            if (!is_valid_addrees(ptr, 2 * WORD_SIZE)) // Want to dereference two int* ptrs -> 8 bytes from ptr
+            if (!is_valid_address(ptr, 2 * WORD_SIZE)) // Want to dereference two int* ptrs -> 8 bytes from ptr
             {
                 cleanup(-1);
                 NOT_REACHED();
@@ -413,10 +414,11 @@ static void syscall_handler (struct intr_frame *f UNUSED)
             ptr = (void *) ( * (int *) stack_ptr);
 
             struct thread *ct = thread_current();
-            f->eax = file_seek(ct->file_arr[fd], pos);
+            file_seek(ct->file_arr[fd], pos);
             break;
-
+       }
        case SYS_TELL:
+       {
           fd = *(int *) stack_ptr;
           stack_ptr += sizeof(WORD_SIZE);
           address_to_check = (void *) * (int * ) stack_ptr;
@@ -427,11 +429,12 @@ static void syscall_handler (struct intr_frame *f UNUSED)
               NOT_REACHED();
           }
 
-          struct thread *ct = thread_current();
-          f->eax = file_tell(ct->file_arr[fd]);
+          struct thread *cth = thread_current();
+          f->eax = file_tell(cth->file_arr[fd]);
           break;
-
+       }
        case SYS_FILESIZE:
+       {
           fd = *(int *) stack_ptr;
           stack_ptr += sizeof(WORD_SIZE);
           address_to_check = (void *) * (int * ) stack_ptr;
@@ -442,11 +445,12 @@ static void syscall_handler (struct intr_frame *f UNUSED)
               NOT_REACHED();
           }
 
-          struct thread *ct = thread_current();
-          f->eax = file_length(ct->file_arr[fd]);
+          struct thread *cth = thread_current();
+          f->eax = file_length(cth->file_arr[fd]);
           break;
-
+       }
        case SYS_REMOVE:
+       {
           address_to_check = (void *) * (int * ) stack_ptr;
           name = (char *) address_to_check;
 
@@ -458,7 +462,7 @@ static void syscall_handler (struct intr_frame *f UNUSED)
 
           f->eax = filesys_remove(name);
           break;
-
+       }
     }
 }
 
