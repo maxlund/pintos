@@ -400,6 +400,66 @@ static void syscall_handler (struct intr_frame *f UNUSED)
                 f->eax = process_wait(child_id);
             }
             break;
+       case SYS_SEEK:
+          fd = *(int *) stack_ptr;
+          stack_ptr += sizeof(WORD_SIZE);
+          off_t pos = *(off_t*)stack_ptr;
+          ptr = (void *) ( * (int *) stack_ptr);
+          // what to check here? is pos we are searching valid adress?
+          // or are we searching for pos?
+          if (!is_valid_address(ptr, WORD_SIZE))
+          {
+             cleanup(-1);
+             NOT_REACHED();
+          }
+
+          struct thread *ct = thread_current();
+          return file_seek(ct->file_arr[fd], pos);
+          break;
+
+       case SYS_TELL:
+          fd = *(int *) stack_ptr;
+          stack_ptr += sizeof(WORD_SIZE);
+          address_to_check = (void *) * (int * ) stack_ptr;
+
+          if (!is_valid_address(address_to_check, WORD_SIZE))
+          {
+              cleanup(-1);
+              NOT_REACHED();
+          }
+
+          struct thread *ct = thread_current();
+          f->eax = file_tell(ct->file_arr[fd]);
+          break;
+
+       case SYS_FILESIZE:
+          fd = *(int *) stack_ptr;
+          stack_ptr += sizeof(WORD_SIZE);
+          address_to_check = (void *) * (int * ) stack_ptr;
+
+          if (!is_valid_address(address_to_check, WORD_SIZE))
+          {
+              cleanup(-1);
+              NOT_REACHED();
+          }
+
+          struct thread *ct = thread_current();
+          f->eax = file_length(ct->file_arr[fd]);
+          break;
+
+       case SYS_REMOVE:
+          address_to_check = (void *) * (int * ) stack_ptr;
+          name = (char *) address_to_check;
+
+          if (!is_valid_address(address_to_check, WORD_SIZE) ||  !is_valid_string((char *) address_to_check))
+          {
+             cleanup(-1);
+             NOT_REACHED();
+          }
+
+          f->eax = filesys_remove(name);
+          break;
+
     }
 }
 
