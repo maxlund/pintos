@@ -30,14 +30,16 @@ bytes_to_sectors (off_t size)
 
 /* In-memory inode. */
 struct inode 
-  {
-    struct list_elem elem;              /* Element in inode list. */
-    disk_sector_t sector;               /* Sector number of disk location. */
-    int open_cnt;                       /* Number of openers. */
-    bool removed;                       /* True if deleted, false otherwise. */
-    int deny_write_cnt;                 /* 0: writes ok, >0: deny writes. */
-    struct inode_disk data;             /* Inode content. */
-  };
+{
+   struct list_elem elem;              /* Element in inode list. */
+   disk_sector_t sector;               /* Sector number of disk location. */
+   int open_cnt;                       /* Number of openers. */
+   bool removed;                       /* True if deleted, false otherwise. */
+   int deny_write_cnt;                 /* 0: writes ok, >0: deny writes. */
+   struct inode_disk data;             /* Inode content. */
+   int read_counter;
+   struct lock inode_lock, read_lock, write_lock; 
+};
 
 /* Returns the disk sector that contains byte offset POS within
    INODE.
@@ -56,12 +58,14 @@ byte_to_sector (const struct inode *inode, off_t pos)
 /* List of open inodes, so that opening a single inode twice
    returns the same `struct inode'. */
 static struct list open_inodes;
+static struct lock global_lock;
 
 /* Initializes the inode module. */
 void
 inode_init (void) 
 {
   list_init (&open_inodes);
+  lock_init(&global_lock);
 }
 
 /* Initializes an inode with LENGTH bytes of data and
@@ -81,6 +85,7 @@ inode_create (disk_sector_t sector, off_t length)
      one sector in size, and you should fix that. */
   ASSERT (sizeof *disk_inode == DISK_SECTOR_SIZE);
 
+  lock_acquire(&global_lock);
   disk_inode = calloc (1, sizeof *disk_inode);
   if (disk_inode != NULL)
     {
@@ -102,6 +107,8 @@ inode_create (disk_sector_t sector, off_t length)
         } 
       free (disk_inode);
     }
+
+  lock_release(&global_lock);
   return success;
 }
 
@@ -114,6 +121,7 @@ inode_open (disk_sector_t sector)
   struct list_elem *e;
   struct inode *inode;
 
+  lock_acquire(&global_lock);
   /* Check whether this inode is already open. */
   for (e = list_begin (&open_inodes); e != list_end (&open_inodes);
        e = list_next (e)) 
@@ -125,6 +133,7 @@ inode_open (disk_sector_t sector)
           return inode; 
         }
     }
+  lock_release(&global_lock);
 
   /* Allocate memory. */
   inode = malloc (sizeof *inode);
@@ -137,6 +146,12 @@ inode_open (disk_sector_t sector)
   inode->open_cnt = 1;
   inode->deny_write_cnt = 0;
   inode->removed = false;
+
+  // our stuff here
+  inode->read_counter = 0;
+  lock_init(&inode->inode_lock);
+  lock_init(&inode->read_lock);
+  lock_init(&inode->write_lock);
   disk_read (filesys_disk, inode->sector, &inode->data);
   return inode;
 }
