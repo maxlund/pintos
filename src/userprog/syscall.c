@@ -134,8 +134,14 @@ static void cleanup(int code)
 #endif
     }
 
-    // Exit & unblock if my parent is the main thread
-    if ( /*my_parent->tid == 1 && */my_parent->status == THREAD_BLOCKED)
+    /*
+     * Exit & unblock if my parent is actually waiting for me.
+     * This is to avoid if a parent is waiting for a child with
+     * tid=k1 and another child with tid=k2 wants to exit, since the
+     * parent is already waiting for k1, k2 doesn't need to block
+     * the parent.
+    */
+    if (my_parent->waiting_for == my_tid && my_parent->status == THREAD_BLOCKED)
         thread_unblock(my_parent);
 
     lock_release(&l);

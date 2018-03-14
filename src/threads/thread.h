@@ -108,6 +108,7 @@ struct thread
      /* Parent's thread structure */
      struct parent_child * parent_child_link;
      struct thread * parent;            /* ptr to my parent */
+     tid_t waiting_for;                 /* specifies the current child the parent is waiting for */
 #endif
 
     /* Owned by thread.c. */

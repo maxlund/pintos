@@ -20,7 +20,7 @@
 #include "threads/vaddr.h"
 
 /* Change this macro to 1 to output some printouts */
-#define     PROCESS_PRINT   1
+#define     PROCESS_PRINT   0
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
@@ -356,6 +356,8 @@ process_wait (tid_t child_tid UNUSED)
             {
 
                 process_log("Will block myself=%p (tid=%d)\n", (void *) ct, ct->tid);
+                /* Update which child we really are waiting for */
+                ct->waiting_for = child_tid;
 
                 intr_disable();
                 thread_block();
