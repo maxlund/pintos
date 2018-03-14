@@ -112,7 +112,7 @@ static void cleanup(int code)
     struct list_elem * e;
 
     //TODO: fix this, free crashes !!!
-    for (e = list_begin(this_threads_children); e != list_end(this_threads_children); e = list_next(e))
+    for (e = list_begin(this_threads_children); e != list_end(this_threads_children); e = list_remove(e))
     {
             // Free the current entry
             pc_t * entry = list_entry(e, pc_t, list_element);
